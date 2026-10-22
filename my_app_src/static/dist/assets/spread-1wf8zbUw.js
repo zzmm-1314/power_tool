@@ -1,0 +1,1 @@
+import{r as t}from"./index-CgBV9wgA.js";function r(e){return t({url:"/spread/unified-heatmap",method:"get",params:e})}function p(e){return t({url:"/spread/plant-heatmap",method:"get",params:e})}function n(e){return t({url:"/spread/daily-prices",method:"get",params:e})}export{r as a,p as b,n as f};

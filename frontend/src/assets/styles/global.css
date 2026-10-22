@@ -1,0 +1,43 @@
+/* 全局状态：所有容器均采用局部滚动 */
+html,
+body,
+#app {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    /* 页面级不滚动 */
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px;
+    color: #303133;
+    background: #f5f7fa;
+}
+
+/* 局部滚动容器统一类 */
+.scroll-y {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* 滚动条美化 */
+.scroll-y::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.scroll-y::-webkit-scrollbar-thumb {
+    background: #c8cdd6;
+    border-radius: 4px;
+}
+
+.scroll-y::-webkit-scrollbar-track {
+    background: transparent;
+}

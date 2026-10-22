@@ -1,0 +1,16 @@
+# 该目录用于存放 Excel 数据文件
+# 建议结构：
+#   data/load/           负荷分析
+#   data/price/          日前电价
+#   data/spread/         价差分析
+#   data/settlement/     结算单（actual / jiaojiang / xiandai）
+#   data/monthly/        月报模板与数据
+# 临时 Excel 数据目录，结构示例：
+#   temp/load/{date}.xlsx
+#   temp/pv/{原文件名}.xlsx
+#     ├─ 新能源总出力YYYYMMDD.xlsx     → kind=pv（实际）
+#     └─ 光伏总出力预测（日）YYYYMMDD.xlsx → kind=pv_forecast（预测）
+#   temp/day-ahead/unified/{date}.xlsx
+#   temp/day-ahead/plant/{nodeName}/{date}.xlsx
+#   temp/spread/unified/{date}.xlsx
+#   temp/spread/plant/{nodeName}/{date}.xlsx
