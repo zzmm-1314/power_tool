@@ -5,6 +5,7 @@ import re
 import shutil
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
+from services.local_paths import get_local_mirror_dir
 from services.storage_config import StorageConfig
 import pandas as pd
 
@@ -26,11 +27,42 @@ class TempManager:
 
     @staticmethod
     def base_dir() -> str:
+        """业务读取根目录：本地镜像"""
+        d = str(get_local_mirror_dir())
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    @staticmethod
+    def write_dir() -> str:
+        """业务写入根目录：云盘（真相源）"""
         d = StorageConfig.get_temp_dir()
         os.makedirs(d, exist_ok=True)
         return d
 
-    # ---------- 路径解析 ----------
+    # ==================== 镜像 ====================
+
+    @staticmethod
+    def mirror_to_local(cloud_path: str) -> None:
+        """把云盘上的某个文件立即镜像到本地，保证上传后可读"""
+        cloud_root = TempManager.write_dir()
+        local_root = TempManager.base_dir()
+        try:
+            rel = os.path.relpath(cloud_path, cloud_root)
+            if rel.startswith(".."):
+                return
+            dst = os.path.join(local_root, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(cloud_path, dst)
+        except Exception as e:
+            print(f"[Temp] 镜像失败 {cloud_path}: {e}")
+
+    @staticmethod
+    def mirror_path_to_local(relpath: str) -> None:
+        cloud_path = os.path.join(TempManager.write_dir(), relpath)
+        if os.path.exists(cloud_path):
+            TempManager.mirror_to_local(cloud_path)
+
+    # ==================== 路径解析（写入用，基于云盘） ====================
 
     @staticmethod
     def resolve_path(
@@ -39,7 +71,7 @@ class TempManager:
         date: str,
         node_name: Optional[str] = None,
     ) -> str:
-        parts = [TempManager.base_dir(), _safe(data_type)]
+        parts = [TempManager.write_dir(), _safe(data_type)]
         if sub_type:
             parts.append(_safe(sub_type))
         if node_name:
@@ -47,7 +79,7 @@ class TempManager:
         parts.append(f"{_safe(date)}.xlsx")
         return os.path.join(*parts)
 
-    # ---------- 保存 ----------
+    # ==================== 保存（写云盘 + 立即镜像） ====================
 
     @staticmethod
     def save(
@@ -59,15 +91,38 @@ class TempManager:
     ) -> str:
         path = TempManager.resolve_path(data_type, sub_type, date, node_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path):
+            os.remove(path)
+        file_storage.save(path)
+        TempManager.mirror_to_local(path)
+        return path
 
-        # 同名文件覆盖（视为更新）
+    @staticmethod
+    def save_raw(file_storage, data_type: str, sub_type: str = "") -> str:
+        parts = [TempManager.write_dir(), _safe(data_type)]
+        if sub_type:
+            for seg in sub_type.split("/"):
+                seg = seg.strip()
+                if seg:
+                    parts.append(_safe(seg))
+
+        base = os.path.join(*parts)
+        os.makedirs(base, exist_ok=True)
+
+        raw_name = os.path.basename(file_storage.filename or "upload.xlsx")
+        ext = os.path.splitext(raw_name)[1].lower()
+        if ext not in (".xlsx", ".xls"):
+            raw_name += ".xlsx"
+
+        path = os.path.join(base, raw_name)
         if os.path.exists(path):
             os.remove(path)
 
         file_storage.save(path)
+        TempManager.mirror_to_local(path)
         return path
 
-    # ---------- 读取 ----------
+    # ==================== 读取（本地优先，缺失时回退云盘） ====================
 
     @staticmethod
     def load(
@@ -76,17 +131,33 @@ class TempManager:
         date: str,
         node_name: Optional[str] = None,
     ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-        path = TempManager.resolve_path(data_type, sub_type, date, node_name)
-        if not os.path.exists(path):
+        # 先在本地镜像里找
+        rel_parts = [_safe(data_type)]
+        if sub_type:
+            rel_parts.append(_safe(sub_type))
+        if node_name:
+            rel_parts.append(_safe(node_name))
+        rel_parts.append(f"{_safe(date)}.xlsx")
+        rel = "/".join(rel_parts)
+
+        local_path = os.path.join(TempManager.base_dir(), rel.replace("/", os.sep))
+        cloud_path = os.path.join(TempManager.write_dir(), rel.replace("/", os.sep))
+
+        path = local_path if os.path.exists(local_path) else None
+        if path is None and os.path.exists(cloud_path):
+            # 本地缺失 → 从云盘补
+            TempManager.mirror_to_local(cloud_path)
+            path = local_path if os.path.exists(local_path) else cloud_path
+
+        if path is None:
             return None, None
         try:
-            df = pd.read_excel(path)
-            return df, path
+            return pd.read_excel(path), path
         except Exception as e:
-            print(f"[Temp] 读取 Excel 失败: {path} → {e}")
+            print(f"[Temp] 读取失败 {path}: {e}")
             return None, path
 
-    # ---------- 列表 ----------
+    # ==================== 列表（扫本地镜像） ====================
 
     @staticmethod
     def list_all() -> List[Dict]:
@@ -100,47 +171,10 @@ class TempManager:
                 full = os.path.join(root, fn)
                 rel = os.path.relpath(full, base).replace("\\", "/")
                 parts = rel.split("/")
-
-                data_type = ""
-                sub_type = ""
-                node_name = ""
-                date = ""
-
-                if len(parts) == 2:
-                    # dataType/file.xlsx
-                    data_type = parts[0]
-                    date = os.path.splitext(parts[-1])[0]
-
-                elif len(parts) == 3:
-                    # dataType/subType/file.xlsx
-                    data_type, sub_type = parts[0], parts[1]
-                    if data_type == "day-ahead" and sub_type == "plant":
-                        # 节点专属文件：文件名即节点名，无日期
-                        node_name = os.path.splitext(parts[-1])[0]
-                        date = ""
-                    else:
-                        date = os.path.splitext(parts[-1])[0]
-
-                elif len(parts) == 4:
-                    # dataType/subType/nodeName/file.xlsx
-                    data_type = parts[0]
-                    sub_type = parts[1]
-                    node_name = parts[2]
-                    date = os.path.splitext(parts[-1])[0]
-
-                else:
-                    continue
-
-                # 文件名带日期的类型：从文件名解析
-                if data_type in ("load", "pv") or (
-                    data_type in ("day-ahead", "spread") and sub_type == "unified"
-                ):
-                    from services.load_parser import extract_date_from_filename
-
-                    file_date = extract_date_from_filename(parts[-1])
-                    if file_date:
-                        date = file_date
-
+                data_type = parts[0] if parts else ""
+                sub_type = parts[1] if len(parts) >= 3 else ""
+                node_name = parts[2] if len(parts) >= 4 else ""
+                date = os.path.splitext(parts[-1])[0]
                 stat = os.stat(full)
                 items.append(
                     {
@@ -156,36 +190,36 @@ class TempManager:
                         ),
                     }
                 )
-
         items.sort(key=lambda x: x["uploadedAt"], reverse=True)
         return items
 
-    # ---------- 删除 ----------
+    # ==================== 删除（本地 + 云盘） ====================
 
     @staticmethod
     def delete_by_relpath(relpath: str) -> bool:
-        base = TempManager.base_dir()
-        full = os.path.abspath(os.path.join(base, relpath))
-        # 防目录穿越
-        if not full.startswith(os.path.abspath(base) + os.sep):
-            return False
-        if not os.path.exists(full):
-            return False
-
-        os.remove(full)
-
-        # 递归清理空目录
-        parent = os.path.dirname(full)
-        while os.path.abspath(parent) != os.path.abspath(base):
-            try:
-                if not os.listdir(parent):
-                    os.rmdir(parent)
-                    parent = os.path.dirname(parent)
-                else:
+        ok = False
+        for root in (TempManager.base_dir(), TempManager.write_dir()):
+            full = os.path.abspath(os.path.join(root, relpath))
+            if not full.startswith(os.path.abspath(root) + os.sep):
+                continue
+            if os.path.exists(full):
+                try:
+                    os.remove(full)
+                    ok = True
+                except OSError as e:
+                    print(f"[Temp] 删除失败 {full}: {e}")
+            # 清理空目录
+            parent = os.path.dirname(full)
+            while os.path.abspath(parent) != os.path.abspath(root):
+                try:
+                    if not os.listdir(parent):
+                        os.rmdir(parent)
+                        parent = os.path.dirname(parent)
+                    else:
+                        break
+                except OSError:
                     break
-            except OSError:
-                break
-        return True
+        return ok
 
     # ---------- 原样保存（用于负荷文件，保留原始文件名） ----------
 

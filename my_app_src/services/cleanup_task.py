@@ -121,7 +121,7 @@ class CleanupTask:
 
                 if all_in_db:
                     try:
-                        os.remove(fp)
+                        TempManager.delete_by_relpath(relpath)
                         removed += 1
                         print(f"[Cleanup] 数据库已更新，删除光伏临时文件: {fn}")
                     except OSError as e:
@@ -165,7 +165,7 @@ class CleanupTask:
 
             if all_in_db:
                 try:
-                    os.remove(fp)
+                    TempManager.delete_by_relpath(relpath)
                     removed += 1
                     print(f"[Cleanup] 数据库已更新，删除日前电价临时文件: {fn}")
                 except OSError as e:
@@ -204,7 +204,7 @@ class CleanupTask:
 
             if all_in_db:
                 try:
-                    os.remove(fp)
+                    TempManager.delete_by_relpath(relpath)
                     removed += 1
                     print(f"[Cleanup] 数据库已更新，删除负荷临时文件: {fn}")
                 except OSError as e:
@@ -309,7 +309,7 @@ class CleanupTask:
 
             if all_in_db:
                 try:
-                    os.remove(fp)
+                    TempManager.delete_by_relpath(relpath)
                     removed += 1
                 except OSError:
                     pass
