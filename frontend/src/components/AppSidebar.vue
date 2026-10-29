@@ -58,6 +58,14 @@ const menus: MenuItem[] = [
         ],
     },
     {
+        title: '中长期合约',
+        children: [
+            { title: '合约分解', path: '/contract/decomposition' },
+            { title: '电厂合约仓位', path: '/contract/position' },
+            { title: '滚撮收益模拟', path: '/contract/rolling-profit' },
+        ],
+    },
+    {
         title: '结算单更新',
         children: [
             { title: '实际结算单更新', path: '/settlement/actual' },
@@ -66,10 +74,22 @@ const menus: MenuItem[] = [
         ],
     },
     { title: '申报系数预测', path: '/coefficient' },
-    { title: '滚撮分析', path: '/rolling' },
-    { title: '月报数据部分填充', path: '/monthly-report' },
+    {
+        title: '月报与数据提取',
+        children: [
+            { title: '月报数据部分填充', path: '/monthly-report' },
+            { title: '结算单 PDF 提取', path: '/monthly-extract' }, // 新增
+        ],
+    },
     { title: '统调电厂', path: '/unified-plants' },
-    { title: '节点编辑', path: '/node-edit' },
+    {
+        title: '设置',
+        children: [
+            { title: '节点编辑', path: '/node-edit' },
+            { title: '中长期合约配置', path: '/settings/contract-config' }, // 新增
+        ],
+    },
+    { title: '滚撮分析', path: '/rolling' },
 ]
 
 /** 默认展开所有折叠框 */

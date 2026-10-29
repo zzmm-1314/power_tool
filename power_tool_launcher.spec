@@ -1,73 +1,190 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec: 显式列出 my_app_src 需要的所有第三方依赖
-打包命令：pyinstaller power_tool_launcher.spec
-"""
+import os
+from pathlib import Path
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_submodules,
+    collect_dynamic_libs,
+)
 
-hidden_imports = [
-    # Flask 相关
+SPEC_DIR = Path(SPECPATH).resolve()
+PROJECT_ROOT = SPEC_DIR.parent if SPEC_DIR.name == "build" else SPEC_DIR
+print(f"[spec] PROJECT_ROOT={PROJECT_ROOT}")
+# ============ 轻量收集：大库只拉核心子模块 + 动态库，data 交给内置 hook ============
+LIGHT_LIBS = [
+    "numpy",
+    "scipy",
+    "sklearn",
+    "pandas",
+]
+
+# ============ 完整收集：内部 data 少、需要一起带走的库 ============
+FULL_LIBS = [
+    "desktop_app_source_updater",
     "flask",
     "flask_cors",
-    "werkzeug",
-    "jinja2",
-    "click",
-    "itsdangerous",
-    "markupsafe",
-    # 数据处理
-    "pandas",
-    "numpy",
+    "dotenv",
     "openpyxl",
-    "xlrd",
-    "et_xmlfile",
-    # HTML / XML 解析
-    "bs4",
-    "lxml",
-    "lxml.etree",
-    "lxml.html",
-    # PDF 解析
     "pdfplumber",
     "pdfminer",
-    "pdfminer.high_level",
-    # Word 渲染
     "docxtpl",
     "docx",
-    # 机器学习
-    "sklearn",
-    "sklearn.linear_model",
-    "sklearn.preprocessing",
-    "sklearn.model_selection",
-    "scipy",
-    # JWT / DB（预留）
+    "bs4",
+    "lxml",
+    "joblib",
+    "threadpoolctl",
     "jwt",
     "pymysql",
-    "cryptography",
-    # HTTP
+    "watchdog",
     "requests",
     "urllib3",
     "certifi",
     "charset_normalizer",
     "idna",
-    # 环境变量
-    "dotenv",
-    # 更新库
-    "desktop_app_source_updater",
 ]
 
+# ============ 显式补充的隐式依赖 ============
+EXTRA_HIDDEN = [
+    # jinja2 / docxtpl
+    "jinja2",
+    "jinja2.ext",
+    "markupsafe",
+
+    # pdfminer
+    "pdfminer",
+    "pdfminer.high_level",
+    "pdfminer.pdfinterp",
+    "pdfminer.layout",
+
+    # openpyxl
+    "et_xmlfile",
+
+    # pandas 时间
+    "pytz",
+    "dateutil",
+    "dateutil.tz",
+
+    # sklearn Cython 子模块
+    "sklearn.utils._typedefs",
+    "sklearn.utils._heap",
+    "sklearn.utils._sorting",
+    "sklearn.utils._vector_sentinel",
+    "sklearn.utils._weight_vector",
+    "sklearn.utils.murmurhash",
+
+    # jwt
+    "jwt.algorithms",
+    "jwt.api_jws",
+    "jwt.api_jwt",
+
+    # pymysql
+    "pymysql.constants",
+    "pymysql.converters",
+    "pymysql.cursors",
+
+    # flask / werkzeug
+    "flask.json",
+    "flask.json.provider",
+    "werkzeug",
+    "werkzeug.routing",
+    "werkzeug.serving",
+    "werkzeug.debug",
+
+    # watchdog 平台观察者
+    "watchdog.observers.winapi",
+    "watchdog.observers.read_directory_changes",
+
+    # ===== 关键修复：numpy.testing → unittest 依赖链 =====
+    "unittest",
+    "unittest.case",
+    "unittest.loader",
+    "unittest.main",
+    "unittest.mock",
+    "unittest.result",
+    "unittest.runner",
+    "unittest.signals",
+    "unittest.suite",
+    "unittest.util",
+    "numpy.testing",
+    "numpy.testing._private",
+    "numpy.testing._private.utils",
+]
+
+datas, binaries, hiddenimports = [], [], list(EXTRA_HIDDEN)
+
+
+def _exclude_tests(name: str) -> bool:
+    """排除 *.tests / *.test.* 子模块，大幅减少隐藏导入"""
+    lowered = name.lower()
+    for seg in (".tests", ".test", "tests.", "test."):
+        if seg in lowered:
+            return False
+    return True
+
+
+# ============ 轻量收集 ============
+for pkg in LIGHT_LIBS:
+    try:
+        hiddenimports += collect_submodules(pkg, filter=_exclude_tests)
+        print(f"[spec] collect_submodules({pkg}) OK")
+    except Exception as e:
+        print(f"[spec] collect_submodules({pkg}) 失败: {e}")
+    try:
+        binaries += collect_dynamic_libs(pkg)
+        print(f"[spec] collect_dynamic_libs({pkg}) OK")
+    except Exception as e:
+        print(f"[spec] collect_dynamic_libs({pkg}) 失败: {e}")
+
+# ============ 完整收集 ============
+for pkg in FULL_LIBS:
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+        print(f"[spec] collect_all({pkg}) OK: datas={len(d)} binaries={len(b)} hidden={len(h)}")
+    except Exception as e:
+        print(f"[spec] collect_all({pkg}) 失败: {e}")
+
+# ============ 图标 ============
+icon_path = PROJECT_ROOT / "assets" / "app.ico"
+icon_args = [str(icon_path)] if icon_path.exists() else []
+print(f"[spec] icon_args={icon_args}")
+
+# ============ Analysis ============
 a = Analysis(
     ["launcher.py"],
-    pathex=[],
-    binaries=[],
-    datas=[
-        # 如果 my_app_src 里有非 .py 资源需要一起打包进 exe，可在此声明；
-        # 但本方案 my_app_src 放在 exe 外面，不需要打包进去
+    pathex=[
+        str(PROJECT_ROOT),
+        str(PROJECT_ROOT / "my_app_src"),
     ],
-    hiddenimports=hidden_imports,
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # 注意：不要排除 unittest / test / unittest.mock
+        # numpy.testing 运行时需要 unittest.TestCase，排除会导致启动崩溃
+        "tkinter.test",
+        "pydoc_data",
+        "doctest",
+        "lib2to3",
+        "pip",
+        "setuptools",
+        "wheel",
+        # 可选：这些不影响功能，可减小体积
+        "matplotlib",
+        "IPython",
+        "notebook",
+        "jupyter",
+        "pytest",
+    ],
     noarchive=False,
+    optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -81,13 +198,19 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=[
+        "vcruntime140.dll",
+        "python3*.dll",
+        "libopenblas*.dll",
+        "mkl_*.dll",
+        "vcomp140.dll",
+    ],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="app.ico",
+    icon=icon_args,
 )

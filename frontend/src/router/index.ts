@@ -43,7 +43,25 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/price-spread/PlantNode.vue'),
         meta: { title: '价差分析 / 电厂节点' },
       },
-
+      // 中长期合约
+      {
+        path: 'contract/decomposition',
+        name: 'ContractDecomposition',
+        component: () => import('@/views/contract/ContractDecomposition.vue'),
+        meta: { title: '中长期合约 / 合约分解' },
+      },
+      {
+        path: 'contract/position',
+        name: 'ContractPosition',
+        component: () => import('@/views/contract/ContractPosition.vue'),
+        meta: { title: '中长期合约 / 电厂合约仓位' },
+      },
+      {
+        path: 'contract/rolling-profit',
+        name: 'RollingProfit',
+        component: () => import('@/views/contract/RollingProfit.vue'),
+        meta: { title: '中长期合约 / 滚撮收益模拟' },
+      },
       // 结算单更新
       {
         path: 'settlement/actual',
@@ -64,18 +82,25 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '结算单更新 / 现代模拟结算单更新' },
       },
 
-      // 月报数据部分填充
       {
-        path: 'monthly-report',
-        name: 'MonthlyReport',
-        component: () => import('@/views/monthly-report/index.vue'),
-        meta: { title: '月报数据部分填充' },
+        path: 'monthly-extract',
+        name: 'MonthlyExtract',
+        component: () => import('@/views/monthly-report/PdfExtract.vue'),
+        meta: { title: '结算单 PDF 数据提取' },
       },
+
+
       {
         path: 'node-edit',
         name: 'NodeEdit',
         component: () => import('@/views/node-edit/index.vue'),
         meta: { title: '节点编辑' },
+      },
+      {
+        path: 'settings/contract-config',
+        name: 'ContractConfig',
+        component: () => import('@/views/settings/ContractConfig.vue'),
+        meta: { title: '设置 / 中长期合约配置' },
       },
       {
         path: 'unified-plants',

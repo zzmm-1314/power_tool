@@ -59,63 +59,10 @@
                 </div>
             </div>
 
-            <!-- ===== 原有：热力图 ===== -->
-            <div class="table-wrap" :class="{ loading }">
-                <table class="price-table">
-                    <thead>
-                        <tr>
-                            <th class="sticky-col corner">时间 \ 日期</th>
-                            <th v-for="d in heatmap.dates" :key="d" class="date-th">{{ d }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(hour, hIdx) in heatmap.hours" :key="hour">
-                            <td class="sticky-col hour-td">{{ hour }}</td>
-                            <td v-for="(d, dIdx) in heatmap.dates" :key="d" class="value-td"
-                                :class="{ empty: heatmap.matrix[hIdx][dIdx] == null }" :style="{
-                                    background: cellBg(heatmap.matrix[hIdx][dIdx]),
-                                    color: cellFg(heatmap.matrix[hIdx][dIdx]),
-                                }" :title="`${d} ${hour}：${formatVal(heatmap.matrix[hIdx][dIdx])} 元/MWh`">
-                                {{ formatVal(heatmap.matrix[hIdx][dIdx]) }}
-                            </td>
-                        </tr>
-
-                        <tr class="avg-row">
-                            <td class="sticky-col avg-label">
-                                <span class="avg-icon">∑</span> 日均值
-                            </td>
-                            <td v-for="(d, dIdx) in heatmap.dates" :key="d" class="value-td avg-value" :style="{
-                                background: cellBg(dailyAvg[dIdx], true),
-                                color: cellFg(dailyAvg[dIdx], true),
-                            }" :title="`${d} 日均价差：${formatVal(dailyAvg[dIdx])} 元/MWh`">
-                                {{ formatVal(dailyAvg[dIdx]) }}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-                <div class="overall-avg">
-                    节点「{{ nodeName }}」全部时段平均价差：
-                    <strong>{{ formatVal(overallAvg) }}</strong> 元/MWh
-                </div>
-            </div>
-
-            <!-- 双向色阶图例 -->
-            <div v-if="heatmap.dates.length" class="legend-bar-wrap">
-                <div class="legend-block">
-                    <span class="legend-tip">日前 &lt; 实时（日前更便宜）</span>
-                    <div class="legend-bar neg"></div>
-                </div>
-                <div class="legend-block">
-                    <span class="legend-tip">日前 &gt; 实时（日前更贵）</span>
-                    <div class="legend-bar pos"></div>
-                </div>
-                <span class="legend-range">
-                    范围：{{ heatmap.minValue }} ~ {{ heatmap.maxValue }} 元/MWh
-                </span>
-            </div>
+            <!-- ===== 新热力图 ===== -->
+            <HeatmapGrid mode="spread" :dates="heatmap.dates" :hours="heatmap.hours" :matrix="heatmap.matrix"
+                :daily-avg="dailyAvg" />
         </template>
-
-        <TempDataPanel data-type="spread" sub-type="plant" :node-name="nodeName" />
     </PageContainer>
 </template>
 
@@ -123,7 +70,6 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import DataSourceTag from '@/components/DataSourceTag.vue'
-import TempDataPanel from '@/components/TempDataPanel.vue'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import {
@@ -136,6 +82,7 @@ import { listPlantNodes } from '@/api/modules/nodes'
 import type { DataSource } from '@/types'
 import { useAppStore } from '@/stores/app'
 import DateRangeInput from '@/components/DateRangeInput.vue'
+import HeatmapGrid from '@/components/HeatmapGrid.vue'
 const appStore = useAppStore()
 
 const loading = ref(false)
@@ -206,32 +153,16 @@ const heatmap = ref<SpreadHeatmapData>({
 })
 
 /* ---------- 每日均价差（3 位） ---------- */
-const dailyAvg = computed<(number | null)[]>(() =>
-    heatmap.value.dates.map((_, dIdx) => {
+const dailyAvg = computed<(number | null)[]>(() => {
+    return heatmap.value.dates.map((_, dIdx) => {
         const col = heatmap.value.matrix
             .map((row) => row[dIdx])
             .filter((v): v is number => v != null)
         if (!col.length) return null
         const sum = col.reduce((a, b) => a + b, 0)
         return Math.round((sum / col.length) * 1000) / 1000
-    }),
-)
-
-/* ---------- 全部时段平均价差（3 位） ---------- */
-const overallAvg = computed<number | null>(() => {
-    const all: number[] = []
-    heatmap.value.matrix.forEach((row) => {
-        row.forEach((v) => {
-            if (v != null) all.push(v)
-        })
     })
-    if (!all.length) return null
-    return Math.round((all.reduce((a, b) => a + b, 0) / all.length) * 1000) / 1000
 })
-
-/* ---------- 双向色阶（与统一结算点价差一致） ---------- */
-const maxPos = computed(() => Math.max(heatmap.value.maxValue, 0.001))
-const maxNegAbs = computed(() => Math.max(-heatmap.value.minValue, 0.001))
 // 初始化：默认最近 14 天（含今天）
 function initDateRange() {
     const end = new Date()
@@ -246,34 +177,6 @@ function fmtDate(d: Date): string {
     const m = String(d.getMonth() + 1).padStart(2, '0')
     const dd = String(d.getDate()).padStart(2, '0')
     return `${y}-${m}-${dd}`
-}
-function cellBg(v: number | null, isAvg = false): string {
-    if (v == null) return '#fafbfc'
-    if (Math.abs(v) < 0.0005) return isAvg ? '#eef0f3' : '#f0f2f5'
-
-    const t =
-        v > 0
-            ? Math.min(1, v / maxPos.value)
-            : Math.min(1, -v / maxNegAbs.value)
-
-    const l = 92 - 37 * t
-    const s = (v > 0 ? 70 : 60) - (isAvg ? 20 : 0)
-    const h = v > 0 ? 0 : 120
-
-    return `hsl(${h}, ${Math.max(15, s)}%, ${l}%)`
-}
-
-function cellFg(v: number | null, isAvg = false): string {
-    if (v == null) return '#c0c4cc'
-    if (Math.abs(v) < 0.0005) return '#909399'
-    const t = v > 0 ? v / maxPos.value : -v / maxNegAbs.value
-    return t > 0.75 && !isAvg ? '#fff' : '#303133'
-}
-
-function formatVal(v: number | null): string {
-    if (v == null) return '—'
-    const sign = v > 0 ? '+' : ''
-    return `${sign}${v.toFixed(3)}`
 }
 async function loadDailyPrices() {
     if (!dailyDate.value || !nodeName.value) {

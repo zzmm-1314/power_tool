@@ -1,4 +1,3 @@
-
 # 电力工具助手
 
 一个面向电力交易业务的桌面工具集，覆盖负荷 / 光伏分析、日前电价、价差分析、结算单更新、月报自动填充、统调电厂、申报系数预测与滚撮分析。支持 Excel 临时数据兜底、自动清理、节点维护、多文件上传、存储目录迁移，并可作为 Windows exe 分发与增量更新。
@@ -84,7 +83,7 @@
 
 ```text
 power-tool/
-├── backend/
+├── my_app_src/
 │   ├── app.py                        # Flask 入口
 │   ├── config.py                     # 读取 .env
 │   ├── extensions.py                 # 预留数据库扩展（当前未启用）
@@ -362,6 +361,13 @@ cd ..
 ```bash
 cd frontend
 npm run build
+cd ..
+# 复制到 static
+Remove-Item .\static -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item .\frontend\dist\* .\static\ -Recurse -Force
+
+# 启动（用 launcher.py 打包后的 exe）
+.\power_tool_launcher.exe
 ```
 
 将 `dist/` 内容放入 `my_app_src/static/`，Flask 以静态目录方式提供。

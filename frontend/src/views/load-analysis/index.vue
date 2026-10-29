@@ -29,8 +29,6 @@
             <span class="dot negative"></span> 预测 &lt; 实际
             <span class="tip-text">（条形图为次坐标轴：预测 − 实际，单位 MW）</span>
         </div>
-
-        <TempDataPanel :data-type="tab === 'load' ? 'load' : 'pv'" :date="dateStart" />
     </PageContainer>
 </template>
 
@@ -44,7 +42,6 @@ import type {
 import PageContainer from '@/components/PageContainer.vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import DataSourceTag from '@/components/DataSourceTag.vue'
-import TempDataPanel from '@/components/TempDataPanel.vue'
 import DateRangeInput from '@/components/DateRangeInput.vue'
 import { fetchLoadAnalysis, fetchPvAnalysis } from '@/api/modules/load'
 import type { DataSource, LoadSeries } from '@/types'

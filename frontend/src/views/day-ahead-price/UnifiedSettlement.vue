@@ -17,58 +17,9 @@
             <code>日前市场出清负荷侧电价YYYYMMDD.xlsx</code>
         </p>
 
-        <div v-else class="table-wrap" :class="{ loading }">
-            <table class="price-table">
-                <thead>
-                    <tr>
-                        <th class="sticky-col corner">时间 \ 日期</th>
-                        <th v-for="d in heatmap.dates" :key="d" class="date-th">{{ d }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(hour, hIdx) in heatmap.hours" :key="hour">
-                        <td class="sticky-col hour-td">{{ hour }}</td>
-                        <td v-for="(d, dIdx) in heatmap.dates" :key="d" class="value-td"
-                            :class="{ empty: heatmap.matrix[hIdx][dIdx] == null }" :style="{
-                                background: cellBg(heatmap.matrix[hIdx][dIdx]),
-                                color: cellFg(heatmap.matrix[hIdx][dIdx]),
-                            }" :title="`${d} ${hour}：${formatVal(heatmap.matrix[hIdx][dIdx])} 元/MWh`">
-                            {{ formatVal(heatmap.matrix[hIdx][dIdx]) }}
-                        </td>
-                    </tr>
-
-                    <!-- ===== 日均值行 ===== -->
-                    <tr class="avg-row">
-                        <td class="sticky-col avg-label">
-                            <span class="avg-icon">∑</span> 日均值
-                        </td>
-                        <td v-for="(d, dIdx) in heatmap.dates" :key="d" class="value-td avg-value" :style="{
-                            background: cellBg(dailyAvg[dIdx], true),
-                            color: cellFg(dailyAvg[dIdx], true),
-                        }" :title="`${d} 日均值：${formatVal(dailyAvg[dIdx])} 元/MWh`">
-                            {{ formatVal(dailyAvg[dIdx]) }}
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <!-- 总体均值（右下角展示，避免独占表格列宽变形） -->
-            <div class="overall-avg">
-                全部时段总均值：
-                <strong>{{ formatVal(overallAvg) }}</strong> 元/MWh
-            </div>
-        </div>
-
-        <div v-if="heatmap.dates.length" class="legend-bar-wrap">
-            <span class="legend-label">低</span>
-            <div class="legend-bar"></div>
-            <span class="legend-label">高</span>
-            <span class="legend-range">
-                {{ heatmap.minValue }} ~ {{ heatmap.maxValue }} 元/MWh
-            </span>
-        </div>
-
-        <TempDataPanel data-type="day-ahead" sub-type="unified" @changed="load" />
+        <!-- ===== 新热力图 ===== -->
+        <HeatmapGrid v-else mode="price" :base-price="350" :dates="heatmap.dates" :hours="heatmap.hours"
+            :matrix="heatmap.matrix" :daily-avg="dailyAvg" />
     </PageContainer>
 </template>
 
@@ -76,11 +27,11 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import DataSourceTag from '@/components/DataSourceTag.vue'
-import TempDataPanel from '@/components/TempDataPanel.vue'
 import { fetchUnifiedHeatmap, type HeatmapData } from '@/api/modules/price'
 import type { DataSource } from '@/types'
 import { useAppStore } from '@/stores/app'
 import DateRangeInput from '@/components/DateRangeInput.vue'
+import HeatmapGrid from '@/components/HeatmapGrid.vue'
 const appStore = useAppStore()
 
 const loading = ref(false)
@@ -104,28 +55,10 @@ const dailyAvg = computed<(number | null)[]>(() => {
             .filter((v): v is number => v != null)
         if (!col.length) return null
         const sum = col.reduce((a, b) => a + b, 0)
-        return Math.round((sum / col.length) * 1000) / 1000    // 3 位
+        return Math.round((sum / col.length) * 1000) / 1000
     })
 })
 
-/* ---------- 全部时段总均值（3 位） ---------- */
-const overallAvg = computed<number | null>(() => {
-    const all: number[] = []
-    heatmap.value.matrix.forEach((row) => {
-        row.forEach((v) => {
-            if (v != null) all.push(v)
-        })
-    })
-    if (!all.length) return null
-    return Math.round((all.reduce((a, b) => a + b, 0) / all.length) * 1000) / 1000
-})
-/* ---------- 色阶 ---------- */
-const range = computed(() => {
-    const min = heatmap.value.minValue
-    const max = heatmap.value.maxValue
-    const span = max - min || 1
-    return { min, max, span }
-})
 // 初始化：默认最近 14 天（含今天）
 function initDateRange() {
     const end = new Date()
@@ -139,37 +72,6 @@ function fmtDate(d: Date): string {
     const m = String(d.getMonth() + 1).padStart(2, '0')
     const dd = String(d.getDate()).padStart(2, '0')
     return `${y}-${m}-${dd}`
-}
-function cellBg(v: number | null, isAvg = false): string {
-    if (v == null) return '#fafbfc'
-    const { min, span } = range.value
-    const t = Math.max(0, Math.min(1, (v - min) / span))
-    // 均值行降低饱和度，视觉上作为"汇总"层
-    const satAdj = isAvg ? -18 : 0
-    if (t < 0.5) {
-        const k = t / 0.5
-        const h = 120 - 65 * k
-        const s = 62 + 23 * k + satAdj
-        return `hsl(${h}, ${Math.max(20, s)}%, 86%)`
-    }
-    const k = (t - 0.5) / 0.5
-    const h = 55 - 55 * k
-    const s = 85 - 15 * k + satAdj
-    return `hsl(${h}, ${Math.max(20, s)}%, 88%)`
-}
-
-function cellFg(v: number | null, isAvg = false): string {
-    if (v == null) return '#c0c4cc'
-    const { min, span } = range.value
-    const t = Math.max(0, Math.min(1, (v - min) / span))
-    if (isAvg) return '#1f2d3d'
-    return t > 0.98 ? '#fff' : '#303133'
-}
-
-/* ---------- 数值格式化：统一 3 位小数 ---------- */
-function formatVal(v: number | null): string {
-    if (v == null) return '—'
-    return v.toFixed(3)
 }
 
 /* ---------- 加载 ---------- */

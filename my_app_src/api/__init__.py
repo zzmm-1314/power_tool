@@ -8,6 +8,7 @@ from .nodes import nodes_bp
 from .unified_plants import unified_plants_bp
 from .coefficient import coefficient_bp
 from .rolling import rolling_bp
+from .contract import contract_bp
 
 
 def register_blueprints(app):
@@ -21,3 +22,4 @@ def register_blueprints(app):
     app.register_blueprint(unified_plants_bp, url_prefix="/api/unified-plants")
     app.register_blueprint(coefficient_bp, url_prefix="/api/coefficient")
     app.register_blueprint(rolling_bp, url_prefix="/api/rolling")
+    app.register_blueprint(contract_bp, url_prefix="/api/contract")

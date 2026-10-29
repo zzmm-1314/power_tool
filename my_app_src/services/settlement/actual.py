@@ -128,6 +128,14 @@ def fill_data(
                 if v is not None:
                     ws_settle[f"{col}{settle_row}"] = v
 
+        # === 新增：长三角 D-3 日跨省滚动撮合 ===
+        r = find_row_by_keyword(ws_src, 4, "长三角D-3日跨省滚动撮合")
+        if r:
+            for off, col in [(1, "V"), (3, "W"), (5, "X")]:
+                v = ws_src.cell(row=r, column=4 + off).value
+                if v is not None:
+                    ws_settle[f"{col}{settle_row}"] = v
+
         wb_src.close()
 
     if progress_func:

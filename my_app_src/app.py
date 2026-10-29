@@ -1,32 +1,91 @@
+import io
 import os
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
-from flask import Flask, send_from_directory, jsonify, Response
+
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 from api import register_blueprints
 from config import Config
-from services.cleanup_task import get_cleanup_task
 
-# ==================== 路径 ====================
+# ==================== 路径 & 环境 ====================
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).resolve().parent
-    STATIC_DIR = APP_ROOT / "static"
 else:
-    # 开发环境：app.py 在 my_app_src/，static 在项目根目录
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
-    APP_ROOT = PROJECT_ROOT
-    STATIC_DIR = PROJECT_ROOT / "static"
+    # 开发环境：app.py 在 my_app_src/ 下，static 与 my_app_src 平级
+    APP_ROOT = Path(__file__).resolve().parent.parent
 
-print(f"[static] frozen={getattr(sys, 'frozen', False)}", flush=True)
-print(f"[static] STATIC_DIR = {STATIC_DIR}", flush=True)
+STATIC_DIR = APP_ROOT / "static"
 
 
+def is_production() -> bool:
+    """exe 打包后强制生产模式；开发环境看 FLASK_ENV"""
+    if getattr(sys, "frozen", False):
+        return True
+    return os.getenv("FLASK_ENV", "development").lower() == "production"
+
+
+IS_PROD = is_production()
+
+
+# ==================== 开发提示页 ====================
+DEV_HINT_HTML = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>电力工具助手 · 开发模式</title>
+<style>
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+     background:#f5f7fa;color:#303133;margin:0;padding:60px 20px;}
+.card{max-width:640px;margin:0 auto;background:#fff;border-radius:8px;
+      padding:32px 36px;box-shadow:0 4px 20px rgba(0,0,0,.06);}
+h1{margin:0 0 8px;font-size:22px;color:#1f2d3d;}
+p{margin:8px 0;line-height:1.7;font-size:14px;color:#606266;}
+code{background:#f4f4f5;padding:2px 6px;border-radius:3px;
+     font-size:13px;color:#d63384;}
+.step{background:#fafbfc;border-left:3px solid #2d6cdf;
+      padding:10px 14px;margin:14px 0;border-radius:4px;font-size:14px;}
+a{color:#2d6cdf;text-decoration:none;}
+a:hover{text-decoration:underline;}
+.badge{display:inline-block;padding:2px 8px;background:#fff7e6;
+       color:#d48806;border-radius:3px;font-size:12px;
+       margin-left:6px;vertical-align:middle;}
+</style></head><body>
+<div class="card">
+  <h1>电力工具助手 · 开发模式 <span class="badge">DEV</span></h1>
+  <p>当前后端 API 已启动，但前端尚未通过本后端托管。</p>
+
+  <div class="step">
+    <strong>1.</strong> 另开一个终端，进入前端目录并启动 Vite：
+    <div><code>cd frontend</code></div>
+    <div><code>npm run dev</code></div>
+  </div>
+
+  <div class="step">
+    <strong>2.</strong> 浏览器访问前端地址：
+    <div><a href="http://localhost:5173" target="_blank">http://localhost:5173</a></div>
+    <p style="margin:6px 0 0;font-size:12px;color:#909399;">
+      Vite 会把 <code>/api</code> 自动代理到 <code>http://127.0.0.1:5000</code>。
+    </p>
+  </div>
+
+  <p style="margin-top:24px;font-size:12px;color:#909399;">
+    如果只是测试 API，可直接访问
+    <a href="/api/load/devices" target="_blank">/api/load/devices</a> 等接口。
+  </p>
+</div>
+</body></html>"""
+
+
+# ==================== create_app ====================
 def create_app() -> Flask:
     app = Flask(
         __name__,
-        static_folder=None,  # ← 关键：禁用 Flask 内置 static 路由
-        template_folder=str(STATIC_DIR),
+        # 生产模式：交给 serve_spa 处理静态文件
+        static_folder=None,
+        template_folder=str(STATIC_DIR) if IS_PROD else None,
     )
     app.config.from_object(Config)
     CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -34,122 +93,131 @@ def create_app() -> Flask:
     register_blueprints(app)
 
     index_html = STATIC_DIR / "index.html"
-    print(f"[static] STATIC_DIR = {STATIC_DIR}", flush=True)
-    print(f"[static] exists = {STATIC_DIR.is_dir()}", flush=True)
-    print(f"[static] index.html exists = {index_html.is_file()}", flush=True)
-    if STATIC_DIR.is_dir():
-        try:
-            names = [p.name for p in STATIC_DIR.iterdir()][:8]
-            print(f"[static] 目录内容（前 8 项）= {names}", flush=True)
-        except Exception as e:
-            print(f"[static] 列目录失败: {e}", flush=True)
+    static_ready = index_html.is_file()
 
+    # ===== 启动诊断 =====
+    print("=" * 60, flush=True)
+    print(f"[env] IS_PROD       = {IS_PROD}", flush=True)
+    print(f"[env] APP_ROOT      = {APP_ROOT}", flush=True)
+    print(f"[env] STATIC_DIR    = {STATIC_DIR}", flush=True)
+    print(f"[env] static_ready  = {static_ready}", flush=True)
+    print("=" * 60, flush=True)
+
+    if not IS_PROD:
+        print(
+            "[dev] 开发模式：不检查 static，仅提供 /api/* 接口",
+            flush=True,
+        )
+        if static_ready:
+            print(
+                f"[dev] 提示：检测到 {STATIC_DIR}，如仍想调试前端请用 Vite",
+                flush=True,
+            )
+    else:
+        if not static_ready:
+            print(
+                f"[prod] 警告：static 目录缺少 index.html，"
+                f"请把前端 dist 复制到 {STATIC_DIR}",
+                flush=True,
+            )
+        else:
+            print(f"[prod] 静态资源就绪：{STATIC_DIR}", flush=True)
+
+    # ===== SPA / 开发提示兜底 =====
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def serve_spa(path):
-        # 1. API 路径不拦截（正常情况下已被蓝图优先命中）
+        # API 路径不拦截
         if path.startswith("api/"):
             return jsonify({"code": 404, "msg": "接口不存在", "data": None}), 404
 
-        # 2. 真实静态文件直接返回（assets、geo、favicon 等）
-        if path:
+        # 真实静态文件直接返回（生产模式或开发模式都允许）
+        if path and static_ready:
             target = STATIC_DIR / path
             if target.is_file():
                 return send_from_directory(STATIC_DIR, path)
 
-        # 3. SPA fallback：返回 index.html 交给 Vue Router
-        if index_html.is_file():
+        # index.html 存在则交给前端路由
+        if static_ready:
             return send_from_directory(STATIC_DIR, "index.html")
 
-        # 4. index.html 缺失 → 返回清晰提示
-        hint = (
-            "<h2>前端未构建</h2>"
-            f"<p>STATIC_DIR：<code>{STATIC_DIR}</code></p>"
-            f"<p>index.html exists：<b>{index_html.is_file()}</b></p>"
-            "<p>请执行：</p>"
-            "<pre>cd frontend\nnpm run build\n"
-            "Remove-Item ..\\my_app_src\\static -Recurse -Force\n"
-            "New-Item -ItemType Directory ..\\my_app_src\\static\n"
-            "Copy-Item .\\dist\\* ..\\my_app_src\\static\\ -Recurse -Force</pre>"
-        )
-        return hint, 500, {"Content-Type": "text/html; charset=utf-8"}
+        # 无前端资源
+        if IS_PROD:
+            # 生产模式缺 static：返回可读提示
+            return (
+                "<h2>前端未构建</h2>"
+                f"<p>请把前端构建产物复制到 <code>{STATIC_DIR}</code></p>"
+                "<pre>cd frontend\nnpm run build\n"
+                "xcopy /E /I /Y dist ..\\static</pre>",
+                500,
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
+        # 开发模式：返回开发提示页
+        return DEV_HINT_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
-    # ===== 存储诊断 =====
-    try:
-        from services.storage_config import debug_storage
-        import json
+    # ===== 后台任务（已移除 WPS 云盘同步与文件清理） =====
+    # 由于后续将使用数据库，不再需要 watchdog 云盘同步和后台本地临时文件清理
 
-        print(
-            "[storage] " + json.dumps(debug_storage(), ensure_ascii=False, default=str),
-            flush=True,
-        )
-    except Exception as e:
-        print(f"[storage] 诊断失败: {e}", flush=True)
-    try:
-        from services.storage_config import debug_storage, deep_scan_storage
-        import json
-
-        print(
-            "[storage] " + json.dumps(debug_storage(), ensure_ascii=False, default=str),
-            flush=True,
-        )
-        print(
-            "[storage-deep] "
-            + json.dumps(deep_scan_storage(), ensure_ascii=False, default=str),
-            flush=True,
-        )
-    except Exception as e:
-        print(f"[storage] 诊断失败: {e}", flush=True)
-    if Config.TEMP_AUTO_CLEAN and (
-        not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
-    ):
-        get_cleanup_task().start()
-
-    # 启动云盘同步（只在真正运行时启动一次）
-    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        try:
-            from services.sync_service import get_sync_service
-
-            get_sync_service().start()
-        except Exception as e:
-            print(f"[sync] 启动失败: {e}", flush=True)
     return app
 
 
 app = create_app()
 
 
-# ==================== 启动入口（必须是函数，launcher 需要 import 它） ====================
-def main():
+# ==================== 启动入口 ====================
+def _pick_free_port() -> int:
     import socket
-    import threading
-    import time
-    import webbrowser
 
-    def pick_free_port() -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
-    def open_browser(url: str, delay: float = 1.2):
-        time.sleep(delay)
-        try:
-            webbrowser.open(url)
-        except Exception as e:
-            print(f"[浏览器] 自动打开失败，请手动访问 {url} ({e})")
 
-    port = pick_free_port()
+def _open_browser_later(url: str, delay: float = 1.2):
+    time.sleep(delay)
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print(f"[launcher] 自动打开浏览器失败：{e}", flush=True)
+
+
+def main():
+    # 端口：环境变量优先，否则自动分配
+    env_port = os.getenv("FLASK_PORT")
+    if env_port and env_port.isdigit():
+        port = int(env_port)
+    else:
+        port = _pick_free_port()
+
     url = f"http://127.0.0.1:{port}/"
 
-    print("=" * 60)
-    print("  电力工具助手")
-    print(f"  访问地址：{url}")
-    print("  按 Ctrl+C 停止服务")
+    print("=" * 60, flush=True)
+    print("  电力工具助手", flush=True)
+    print(f"  模式：{'生产' if IS_PROD else '开发'}", flush=True)
+    print(f"  后端端口：{port}", flush=True)
+    if IS_PROD:
+        print(f"  访问地址：{url}", flush=True)
+    else:
+        print(f"  API 地址：http://127.0.0.1:{port}/api/", flush=True)
+        print(f"  前端请另开终端启动：cd frontend && npm run dev", flush=True)
+        print(f"  前端地址：http://localhost:5173", flush=True)
+    print("  按 Ctrl+C 停止服务", flush=True)
     print("=" * 60, flush=True)
 
-    threading.Thread(target=open_browser, args=(url,), daemon=True).start()
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    # 只在生产模式自动打开浏览器
+    if IS_PROD:
+        threading.Thread(target=_open_browser_later, args=(url,), daemon=True).start()
+
+    # 开发环境强制开启 debug 和热重载
+    is_debug = not IS_PROD
+
+    app.run(
+        host="127.0.0.1",
+        port=port,
+        debug=is_debug,
+        use_reloader=is_debug,
+    )
 
 
 if __name__ == "__main__":
