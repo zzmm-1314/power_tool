@@ -1,304 +1,307 @@
 <template>
     <PageContainer title="滚撮分析">
-        <template #extra>
-            <button class="btn-upload" :disabled="!html || loading" @click="doExport">
-                📥 导出 Excel
+        <!-- 控制栏 -->
+        <div class="control-bar">
+            <div class="form-group">
+                <label>标的日 (D日)</label>
+                <input type="date" v-model="params.date" class="input" />
+            </div>
+            <button class="btn-primary" :disabled="loading" @click="loadData">
+                {{ loading ? '计算中...' : '🔍 查询分析' }}
             </button>
-        </template>
-
-        <!-- 输入区 -->
-        <div class="card">
-            <div class="form-row">
-                <label>均值天数</label>
-                <input v-model.number="avgDays" type="number" min="1" max="60" class="input small" />
-                <span class="unit">天</span>
-
-                <label class="inline-label">参考日期（可选）</label>
-                <input v-model="refDate" type="date" class="input" />
-                <span class="hint">（不填则使用全部可用数据）</span>
-
-                <button class="btn primary" :disabled="!html || loading" @click="doAnalyze">
-                    {{ loading ? '分析中...' : '开始分析' }}
-                </button>
-            </div>
-
-            <div class="form-row column">
-                <label>HTML 片段</label>
-                <textarea v-model="html" class="textarea" rows="10"
-                    placeholder="粘贴滚动撮合市场盘口表格的 HTML（包含 el-table__body 或 el-table__body-wrapper）"></textarea>
-            </div>
-
-            <p v-if="msg" class="msg" :class="msgType">{{ msg }}</p>
-            <p v-if="result" class="dates-tip">
-                已使用 {{ result.avg_days }} 天均值，日期：
-                <strong>{{ result.dates_used.join('、') }}</strong>
-            </p>
         </div>
 
-        <!-- 结果区 -->
-        <template v-if="result && result.rows.length">
-            <!-- 图 1：价格曲线 -->
-            <div class="card chart-card">
-                <div class="chart-title">买1价 / 卖1价 / 日前均价</div>
-                <div class="chart-body">
-                    <VChart :option="priceOption" autoresize class="chart" />
-                </div>
-            </div>
+        <!-- 图例说明 -->
+        <div class="legend-tip">
+            <span>日前价格：</span>
+            <span class="dot price-low"></span> &lt; 350
+            <span class="dot price-high"></span> &gt; 350
+            <span class="gap"></span>
+            <span>价差：</span>
+            <span class="dot spread-neg"></span> &lt; 0
+            <span class="dot spread-pos"></span> &gt; 0
+        </div>
 
-            <!-- 图 2：价差柱 -->
-            <div class="card chart-card">
-                <div class="chart-title">买1价 − 日前均价 / 卖1价 − 日前均价</div>
-                <div class="chart-body">
-                    <VChart :option="diffOption" autoresize class="chart" />
-                </div>
-            </div>
+        <!-- 表格区 -->
+        <div class="result-card">
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="sticky-col col-time">时段</th>
+                            <th>当日日前价格</th>
 
-            <!-- 表格 -->
-            <div class="card">
-                <div class="chart-title">明细（{{ result.rows.length }} 条）</div>
-                <div class="table-wrap scroll-y">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>时段</th>
-                                <th>最新价</th>
-                                <th>买1价</th>
-                                <th>卖1价</th>
-                                <th>日前均价</th>
-                                <th>买1-均价</th>
-                                <th>卖1-均价</th>
-                                <th>成交方向</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="r in result.rows" :key="r.hour">
-                                <td>{{ r.hour_label }}</td>
-                                <td>{{ fmt(r.latest) }}</td>
-                                <td>{{ fmt(r.bid1) }}</td>
-                                <td>{{ fmt(r.ask1) }}</td>
-                                <td>{{ fmt(r.avg_price) }}</td>
-                                <td :class="diffClass(r.bid1_diff)">{{ fmtSigned(r.bid1_diff) }}</td>
-                                <td :class="diffClass(r.ask1_diff)">{{ fmtSigned(r.ask1_diff) }}</td>
-                                <td>{{ r.direction || '—' }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                            <th class="group-start">{{ dateD2 }} 电量</th>
+                            <th>{{ dateD2 }} 电价</th>
+                            <th>{{ dateD2 }} 价差</th>
+
+                            <th class="group-start">{{ dateD3 }} 电量</th>
+                            <th>{{ dateD3 }} 电价</th>
+                            <th>{{ dateD3 }} 价差</th>
+
+                            <th class="group-start">{{ dateD4 }} 电量</th>
+                            <th>{{ dateD4 }} 电价</th>
+                            <th>{{ dateD4 }} 价差</th>
+
+                            <th class="group-start">市场合计 电量</th>
+                            <th>市场合计 电价</th>
+                            <th>市场合计 价差</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(row, idx) in tableData" :key="idx">
+                            <td class="sticky-col col-time">{{ row.time }}</td>
+                            <td :style="priceStyle(row.dayAheadPrice)">{{ format(row.dayAheadPrice) }}</td>
+
+                            <!-- D-2 -->
+                            <td class="group-start">{{ format(row.d2Qty) }}</td>
+                            <td>{{ format(row.d2Price) }}</td>
+                            <td :style="diffStyle(row.d2Diff)">{{ format(row.d2Diff) }}</td>
+
+                            <!-- D-3 -->
+                            <td class="group-start">{{ format(row.d3Qty) }}</td>
+                            <td>{{ format(row.d3Price) }}</td>
+                            <td :style="diffStyle(row.d3Diff)">{{ format(row.d3Diff) }}</td>
+
+                            <!-- D-4 -->
+                            <td class="group-start">{{ format(row.d4Qty) }}</td>
+                            <td>{{ format(row.d4Price) }}</td>
+                            <td :style="diffStyle(row.d4Diff)">{{ format(row.d4Diff) }}</td>
+
+                            <!-- 市场合计 -->
+                            <td class="group-start">{{ format(row.marketQty) }}</td>
+                            <td>{{ format(row.marketPrice) }}</td>
+                            <td :style="diffStyle(row.marketDiff)">{{ format(row.marketDiff) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </template>
+        </div>
     </PageContainer>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import type { EChartsOption } from 'echarts'
-import VChart from 'vue-echarts'
+import { ref, reactive, computed } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
-import {
-    analyzeRolling,
-    exportRolling,
-    type RollingResult,
-} from '@/api/modules/rolling'
 
-const html = ref('')
-const avgDays = ref(3)
-const refDate = ref('')
 const loading = ref(false)
-const msg = ref('')
-const msgType = ref<'ok' | 'err'>('ok')
-const result = ref<RollingResult | null>(null)
+const params = reactive({
+    date: '2026-10-30', // 标的日
+})
 
-function fmt(v: number | null): string {
-    if (v == null) return '—'
-    return Number(v).toFixed(3)
-}
-function fmtSigned(v: number | null): string {
-    if (v == null) return '—'
-    const sign = v > 0 ? '+' : ''
-    return `${sign}${Number(v).toFixed(3)}`
-}
-function diffClass(v: number | null): string {
-    if (v == null) return ''
-    return v > 0 ? 'diff-pos' : v < 0 ? 'diff-neg' : ''
+// 根据标的日计算具体日期
+function getDateOffset(baseDate: string, offsetDays: number): string {
+    if (!baseDate) return ''
+    const d = new Date(baseDate)
+    d.setDate(d.getDate() - offsetDays)
+    return d.toISOString().slice(0, 10)
 }
 
-async function doAnalyze() {
-    msg.value = ''
+const dateD2 = computed(() => getDateOffset(params.date, 2))
+const dateD3 = computed(() => getDateOffset(params.date, 3))
+const dateD4 = computed(() => getDateOffset(params.date, 4))
+
+// 存储表格数据
+const tableData = ref<any[]>([])
+
+// 时间标签
+const SLOT_LABELS = Array.from({ length: 48 }).map((_, i) => {
+    const h = Math.floor(i / 2)
+    const m = (i % 2) * 30
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+})
+
+// 格式化显示
+function format(v: number | null | undefined) {
+    if (v == null || isNaN(v)) return '-'
+    return v.toFixed(3)
+}
+
+// 样式：日前价格（基准350）
+function priceStyle(v: number) {
+    if (v == null) return {}
+    const base = 350
+    if (v < base) {
+        const intensity = Math.min((base - v) / 200, 1)
+        return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
+    } else {
+        const intensity = Math.min((v - base) / 200, 1)
+        return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
+    }
+}
+
+// 样式：价差（基准0）
+function diffStyle(v: number | null) {
+    if (v == null || v === 0) return {}
+    if (v > 0) {
+        const intensity = Math.min(Math.abs(v) / 100, 1)
+        return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
+    } else {
+        const intensity = Math.min(Math.abs(v) / 100, 1)
+        return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
+    }
+}
+
+// 计算逻辑
+async function loadData() {
+    if (!params.date) return alert('请选择标的日')
     loading.value = true
-    try {
-        const res = await analyzeRolling({
-            html: html.value,
-            avgDays: avgDays.value,
-            refDate: refDate.value || undefined,
-        })
-        result.value = res
-        msg.value = `分析完成，共 ${res.rows.length} 条时段数据`
-        msgType.value = 'ok'
-    } catch (e) {
-        msg.value = (e as Error).message || '分析失败'
-        msgType.value = 'err'
-        result.value = null
-    } finally {
+
+    setTimeout(() => {
+        // 模拟当日日前价格(48点)
+        const dayAheadPrices = Array.from({ length: 48 }).map(() => 300 + Math.random() * 200)
+
+        // 模拟 D-2、D-3、D-4 的成交数据（24点）
+        const tradesD2 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 100, price: 400 + Math.random() * 100 }))
+        const tradesD3 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 80, price: 410 + Math.random() * 100 }))
+        const tradesD4 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 120, price: 390 + Math.random() * 100 }))
+
+        let rows = []
+
+        for (let i = 0; i < 48; i++) {
+            const hourIdx = Math.floor(i / 2) // 24点数据索引
+            const daPrice = dayAheadPrices[i]
+
+            // D-2
+            const d2Qty = tradesD2[hourIdx].qty
+            const d2Price = tradesD2[hourIdx].price
+            const d2Diff = d2Price - daPrice
+
+            // D-3
+            const d3Qty = tradesD3[hourIdx].qty
+            const d3Price = tradesD3[hourIdx].price
+            const d3Diff = d3Price - daPrice
+
+            // D-4
+            const d4Qty = tradesD4[hourIdx].qty
+            const d4Price = tradesD4[hourIdx].price
+            const d4Diff = d4Price - daPrice
+
+            // 市场合计计算
+            const marketQty = d2Qty + d3Qty + d4Qty
+            const marketPrice = marketQty > 0
+                ? (d2Qty * d2Price + d3Qty * d3Price + d4Qty * d4Price) / marketQty
+                : 0
+            const marketDiff = marketQty > 0 ? marketPrice - daPrice : 0
+
+            rows.push({
+                time: SLOT_LABELS[i],
+                dayAheadPrice: daPrice,
+
+                d2Qty, d2Price, d2Diff,
+                d3Qty, d3Price, d3Diff,
+                d4Qty, d4Price, d4Diff,
+
+                marketQty, marketPrice, marketDiff
+            })
+        }
+
+        tableData.value = rows
         loading.value = false
-    }
+    }, 500)
 }
+// import { ref, reactive, computed } from 'vue'
+// import PageContainer from '@/components/PageContainer.vue'
+// import { request } from '@/api/request' // 引入你封装的 axios
 
-async function doExport() {
-    msg.value = ''
-    try {
-        await exportRolling({
-            html: html.value,
-            avgDays: avgDays.value,
-            refDate: refDate.value || undefined,
-        })
-        msg.value = '导出成功'
-        msgType.value = 'ok'
-    } catch (e) {
-        msg.value = (e as Error).message || '导出失败'
-        msgType.value = 'err'
-    }
-}
+// const loading = ref(false)
+// const params = reactive({
+//     date: '2026-10-30',
+// })
 
-/* ---------------- 图表 ---------------- */
-const hours = computed(() => (result.value?.rows || []).map((r) => r.hour_label))
+// // 接收后端返回的日期
+// const dateD2 = ref('D-2')
+// const dateD3 = ref('D-3')
+// const dateD4 = ref('D-4')
 
-const priceOption = computed<EChartsOption>(() => {
-    const rows = result.value?.rows || []
-    return {
-        tooltip: {
-            trigger: 'axis',
-            valueFormatter: (v: any) =>
-                typeof v === 'number' ? v.toFixed(3) : '—',
-        },
-        legend: { top: 0, data: ['买1价', '卖1价', '日前均价'] },
-        grid: { left: 60, right: 24, top: 36, bottom: 42 },
-        xAxis: { type: 'category', data: hours.value, axisLabel: { interval: 2 } },
-        yAxis: { type: 'value', name: '元/MWh' },
-        series: [
-            {
-                name: '买1价',
-                type: 'line',
-                smooth: true,
-                showSymbol: false,
-                data: rows.map((r) => r.bid1),
-                lineStyle: { color: '#67c23a' },
-            },
-            {
-                name: '卖1价',
-                type: 'line',
-                smooth: true,
-                showSymbol: false,
-                data: rows.map((r) => r.ask1),
-                lineStyle: { color: '#f56c6c' },
-            },
-            {
-                name: '日前均价',
-                type: 'line',
-                smooth: true,
-                showSymbol: false,
-                data: rows.map((r) => r.avg_price),
-                lineStyle: { color: '#2d6cdf', type: 'dashed' },
-            },
-        ],
-    }
-})
+// const tableData = ref<any[]>([])
 
-const diffOption = computed<EChartsOption>(() => {
-    const rows = result.value?.rows || []
-    return {
-        tooltip: {
-            trigger: 'axis',
-            valueFormatter: (v: any) =>
-                typeof v === 'number' ? v.toFixed(3) : '—',
-        },
-        legend: { top: 0, data: ['买1价−均价', '卖1价−均价'] },
-        grid: { left: 64, right: 24, top: 36, bottom: 42 },
-        xAxis: { type: 'category', data: hours.value, axisLabel: { interval: 2 } },
-        yAxis: { type: 'value', name: '价差(元/MWh)' },
-        series: [
-            {
-                name: '买1价−均价',
-                type: 'bar',
-                data: rows.map((r) => ({
-                    value: r.bid1_diff,
-                    itemStyle: {
-                        color:
-                            r.bid1_diff == null
-                                ? 'transparent'
-                                : r.bid1_diff >= 0
-                                    ? 'rgba(103,194,58,0.7)'
-                                    : 'rgba(245,108,108,0.7)',
-                    },
-                })),
-            },
-            {
-                name: '卖1价−均价',
-                type: 'bar',
-                data: rows.map((r) => ({
-                    value: r.ask1_diff,
-                    itemStyle: {
-                        color:
-                            r.ask1_diff == null
-                                ? 'transparent'
-                                : r.ask1_diff >= 0
-                                    ? 'rgba(103,194,58,0.7)'
-                                    : 'rgba(245,108,108,0.7)',
-                    },
-                })),
-            },
-        ],
-    }
-})
+// const SLOT_LABELS = Array.from({ length: 48 }).map((_, i) => {
+//     const h = Math.floor(i / 2)
+//     const m = (i % 2) * 30
+//     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+// })
+
+// function format(v: number | null | undefined) {
+//     if (v == null || isNaN(v)) return '-'
+//     return v.toFixed(3)
+// }
+
+// function priceStyle(v: number | null) {
+//     if (v == null) return {}
+//     const base = 350
+//     if (v < base) {
+//         const intensity = Math.min((base - v) / 200, 1)
+//         return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
+//     } else {
+//         const intensity = Math.min((v - base) / 200, 1)
+//         return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
+//     }
+// }
+
+// function diffStyle(v: number | null) {
+//     if (v == null || v === 0) return {}
+//     if (v > 0) {
+//         const intensity = Math.min(Math.abs(v) / 100, 1)
+//         return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
+//     } else {
+//         const intensity = Math.min(Math.abs(v) / 100, 1)
+//         return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
+//     }
+// }
+
+// async function loadData() {
+//     if (!params.date) return alert('请选择标的日')
+//     loading.value = true
+
+//     try {
+//         // 请求真实接口
+//         const res = await request({
+//             url: '/rolling/analysis',
+//             method: 'get',
+//             params: { targetDate: params.date }
+//         })
+
+//         const data = (res as any).data || res
+
+//         if (data && data.rows) {
+//             tableData.value = data.rows
+//             // 更新表头日期
+//             dateD2.value = data.d2Date
+//             dateD3.value = data.d3Date
+//             dateD4.value = data.d4Date
+//         }
+//     } catch (err: any) {
+//         alert('查询失败：' + (err.message || '后端服务异常'))
+//     } finally {
+//         loading.value = false
+//     }
+// }
 </script>
 
 <style scoped>
-.card {
-    background: #fff;
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    padding: 14px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.form-row {
+/* 控制栏 */
+.control-bar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 16px;
+    background: #fff;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
     flex-wrap: wrap;
 }
 
-.form-row>label:first-child {
+.form-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.form-group label {
     font-size: 13px;
     color: #606266;
-    min-width: 70px;
-}
-
-.form-row.column {
-    flex-direction: column;
-    align-items: stretch;
-}
-
-.form-row.column>label:first-child {
-    min-width: auto;
-    margin-bottom: 4px;
-}
-
-.inline-label {
-    font-size: 13px;
-    color: #606266;
-    margin-left: 8px;
-}
-
-.unit {
-    font-size: 12px;
-    color: #909399;
-}
-
-.hint {
-    font-size: 12px;
-    color: #909399;
+    white-space: nowrap;
 }
 
 .input {
@@ -306,138 +309,137 @@ const diffOption = computed<EChartsOption>(() => {
     padding: 0 10px;
     border: 1px solid #dcdfe6;
     border-radius: 4px;
-    font-size: 13px;
     outline: none;
+    width: 140px;
 }
 
-.input:focus {
-    border-color: #2d6cdf;
-}
-
-.input.small {
-    width: 90px;
-}
-
-.textarea {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    font-size: 13px;
-    font-family: 'Consolas', 'Monaco', monospace;
-    outline: none;
-    resize: vertical;
-}
-
-.textarea:focus {
-    border-color: #2d6cdf;
-}
-
-.btn {
-    height: 32px;
-    padding: 0 16px;
-    border: none;
-    border-radius: 4px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.btn.primary {
+.btn-primary {
+    height: 34px;
+    padding: 0 20px;
     background: #2d6cdf;
     color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: auto;
 }
 
-.btn.primary:hover:not(:disabled) {
-    background: #2459b8;
-}
-
-.btn:disabled {
-    color: #fff;
+.btn-primary:disabled {
     background: #a0b4d8;
     cursor: not-allowed;
 }
 
-.msg {
-    margin: 0;
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    display: inline-block;
-}
-
-.msg.ok {
-    background: #f0f9eb;
-    color: #67c23a;
-}
-
-.msg.err {
-    background: #fef0f0;
-    color: #f56c6c;
-}
-
-.dates-tip {
-    margin: 0;
+/* 图例 */
+.legend-tip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
     font-size: 12px;
     color: #606266;
+    margin-top: 12px;
 }
 
-.dates-tip strong {
-    color: #2d6cdf;
+.dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid #ebeef5;
 }
 
-.chart-card .chart-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #303133;
+.dot.price-low {
+    background: rgba(103, 194, 58, 0.6);
 }
 
-.chart-body {
-    min-height: 360px;
+.dot.price-high {
+    background: rgba(245, 108, 108, 0.6);
 }
 
-.chart {
-    width: 100%;
-    height: 360px;
+.dot.spread-neg {
+    background: rgba(103, 194, 58, 0.6);
+}
+
+.dot.spread-pos {
+    background: rgba(245, 108, 108, 0.6);
+}
+
+.gap {
+    width: 16px;
+}
+
+/* 表格 */
+.result-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+    margin-top: 16px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-height: calc(100vh - 240px);
 }
 
 .table-wrap {
-    max-height: 460px;
-    overflow-y: auto;
-    border: 1px solid #f0f2f5;
-    border-radius: 4px;
+    flex: 1;
+    overflow: auto;
 }
 
 .data-table {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-
-.data-table th,
-.data-table td {
-    padding: 6px 10px;
-    border-bottom: 1px solid #f0f2f5;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
     text-align: center;
     white-space: nowrap;
 }
 
+.data-table th,
+.data-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #ebeef5;
+    border-right: 1px solid #ebeef5;
+    font-variant-numeric: tabular-nums;
+}
+
 .data-table th {
+    background: #f5f7fa;
+    font-weight: 600;
+    color: #303133;
     position: sticky;
     top: 0;
+    z-index: 2;
+}
+
+/* 区分分组 */
+.group-start {
+    border-left: 2px solid #dcdfe6;
+}
+
+.data-table th.group-start {
+    border-left: 2px solid #c0c4cc;
+}
+
+/* 固定首列 */
+.sticky-col {
+    position: sticky;
     background: #f5f7fa;
-    color: #303133;
-    font-weight: 600;
-    font-size: 12px;
     z-index: 1;
+    border-right: 1px solid #dcdfe6;
 }
 
-.diff-pos {
-    color: #67c23a;
-    font-weight: 600;
+.data-table th.sticky-col {
+    z-index: 3;
 }
 
-.diff-neg {
-    color: #f56c6c;
-    font-weight: 600;
+.col-time {
+    left: 0;
+    width: 60px;
+    font-weight: 500;
 }
 </style>

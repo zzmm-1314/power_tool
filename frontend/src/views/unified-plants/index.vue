@@ -1,6 +1,11 @@
 <template>
     <PageContainer title="统调电厂">
         <template #extra>
+            <!-- 新增：下载模板按钮 -->
+            <a href="/api/unified-plants/template" class="btn ghost"
+                style="text-decoration: none; display: inline-flex; align-items: center; margin-right: 8px;">
+                ⬇ 下载模板
+            </a>
             <input ref="fileInputRef" type="file" accept=".xlsx,.xls" class="file-input" @change="onFileChange" />
             <button class="btn" :disabled="!selectedFile || importing" @click="doImport">
                 {{ importing ? '导入中...' : '📥 导入数据' }}

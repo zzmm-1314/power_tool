@@ -41,7 +41,6 @@ def day_ahead_price():
                 "date": date,
                 "nodeType": "unified",
                 "source": data["source"],
-                "tempPath": None,
                 "points": data["hourly"],
                 "raw": data["raw"],
             }
@@ -50,14 +49,13 @@ def day_ahead_price():
     if not node_name:
         return fail("电厂节点查询需提供 nodeName")
 
-    df, source, temp_path = fetch_data("day-ahead", node_type, date, node_name)
+    df, source = fetch_data("day-ahead", node_type, date, node_name)
     return success(
         {
             "date": date,
             "nodeType": node_type,
             "nodeName": node_name,
             "source": source,
-            "tempPath": temp_path,
             "points": df_to_points(df, decimals=3),
         }
     )

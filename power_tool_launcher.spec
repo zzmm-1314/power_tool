@@ -147,9 +147,16 @@ for pkg in FULL_LIBS:
         print(f"[spec] collect_all({pkg}) 失败: {e}")
 
 # ============ 图标 ============
-icon_path = PROJECT_ROOT / "assets" / "app.ico"
-icon_args = [str(icon_path)] if icon_path.exists() else []
-print(f"[spec] icon_args={icon_args}")
+# 依次尝试：项目根目录 app.ico → assets/app.ico
+icon_candidates = [
+    PROJECT_ROOT / "app.ico",
+    PROJECT_ROOT / "assets" / "app.ico",
+]
+icon_path = next((p for p in icon_candidates if p.exists()), None)
+if icon_path is None:
+    print(f"[spec] 警告：未找到图标文件，已尝试: {[str(p) for p in icon_candidates]}")
+else:
+    print(f"[spec] icon={icon_path}")
 
 # ============ Analysis ============
 a = Analysis(
@@ -212,5 +219,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_args,
+    icon=str(icon_path) if icon_path else None,
 )

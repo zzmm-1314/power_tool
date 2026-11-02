@@ -17,7 +17,7 @@ export function fetchDayAheadPlant(params: { date: string; nodeName: string }) {
     })
 }
 
-/** 电厂节点列表（从临时数据中提取） */
+/** 电厂节点列表（节点编辑中已录入的节点） */
 export function fetchPlantNodes() {
     return request<string[]>({ url: '/price/plant-nodes', method: 'get' })
 }

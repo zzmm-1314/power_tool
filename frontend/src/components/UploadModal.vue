@@ -8,7 +8,7 @@
                     <div class="modal-header">
                         <h2 class="modal-title">📤 上传 Excel</h2>
                         <p class="modal-subtitle">
-                            选择数据类型后批量上传，系统自动识别日期
+                            选择数据类型后批量上传，解析结果即时预览，原始文件不保存到本地
                         </p>
                     </div>
 
@@ -97,14 +97,29 @@
                                     </template>
 
                                     <template v-else-if="r.error">（{{ r.error }}）</template>
+
+                                    <span v-if="r.ok && r.saved === true" class="saved-tip">
+                                        · 已写入数据库
+                                    </span>
+                                    <span v-else-if="r.ok && r.saved === false" class="preview-tip"
+                                        :title="r.dbError || '数据库不可用'">
+                                        · 仅内存预览（重启后需重新上传）
+                                    </span>
                                 </span>
                             </li>
                         </ul>
+                        <!-- ⭐ 新增：即时预览 -->
+                        <UploadPreview v-if="previewParams" :key="previewKey" :dataset-key="previewParams.datasetKey"
+                            :date="previewParams.date" :node-name="previewParams.nodeName" :saved="previewParams.saved"
+                            :save-tip="previewParams.saveTip" />
                     </div>
 
                     <div class="modal-footer">
                         <button class="btn ghost" @click="close" :disabled="uploading">
                             取消
+                        </button>
+                        <button v-if="canGoToPage" class="btn ghost" @click="goToPage">
+                            👁 前往查看
                         </button>
                         <button class="btn" :disabled="!canSubmit || uploading" @click="submit">
                             {{ uploading ? '上传中...' : `上传 ${selectedFiles.length || ''} 个文件` }}
@@ -119,12 +134,20 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
-import {
-    uploadTempData,
-    uploadSingleTempFile,
-    type UploadItemResult,
-} from '@/api/modules/tempData'
+import { uploadSingleFile, type UploadItemResult } from '@/api/modules/upload'
 import { listPlantNodes, type PlantNode } from '@/api/modules/nodes'
+import { useRouter } from 'vue-router'
+import UploadPreview from './UploadPreview.vue'
+const router = useRouter()
+/** 数据类型 → 对应业务页面路由（用于「前往查看」按钮） */
+const PAGE_MAP: Record<string, string> = {
+    load: '/load-analysis',
+    pv: '/load-analysis',
+    'day-ahead-unified': '/day-ahead-price/unified',
+    'day-ahead-plant': '/day-ahead-price/plant',
+    'spread-unified': '/price-spread/unified',
+    'spread-plant': '/price-spread/plant',
+}
 interface DatasetOption {
     key: string
     label: string
@@ -219,7 +242,64 @@ const canSubmit = computed(() => {
 })
 // 新增：从节点列表加载
 const nodeOptions = ref<PlantNode[]>([])
+/** 取第一个成功的上传结果用于预览 */
+const firstSuccess = computed<UploadItemResult | null>(
+    () => uploadResults.value.find((r) => r.ok) || null,
+)
 
+/**
+ * 预览参数：从上传结果 & 当前数据集推导
+ * - 缺失日期 / plant 类型缺失节点时返回 null → 不展示预览
+ */
+const previewParams = computed<{
+    datasetKey: string
+    date: string
+    nodeName?: string
+    saved?: boolean
+    saveTip?: string
+} | null>(() => {
+    const r = firstSuccess.value
+    if (!r) return null
+
+    const ds = currentDataset.value
+    const date = r.dates?.[0]
+    if (!date) return null
+
+    let nodeName: string | undefined
+    if (ds.key.includes('plant')) {
+        nodeName = r.nodes?.[0]
+        if (!nodeName) return null
+    }
+
+    return {
+        datasetKey: ds.key,
+        date,
+        nodeName,
+        saved: r.saved,
+        saveTip: r.dbError,
+    }
+})
+
+/** 用于强制刷新预览（切换文件/重传时） */
+const previewKey = computed(() => {
+    const p = previewParams.value
+    if (!p) return ''
+    return `${p.datasetKey}|${p.date}|${p.nodeName || ''}|${p.saved}`
+})
+
+/** 有成功结果 + 有对应页面路由时，才展示「前往查看」 */
+const canGoToPage = computed(
+    () =>
+        !uploading.value &&
+        !!previewParams.value &&
+        !!PAGE_MAP[currentDataset.value.key],
+)
+
+function goToPage() {
+    const path = PAGE_MAP[currentDataset.value.key]
+    if (path) router.push(path)
+    close()
+}
 async function loadNodes() {
     try {
         nodeOptions.value = await listPlantNodes()
@@ -303,7 +383,7 @@ async function submit() {
         item.loaded = 0
 
         try {
-            const res = await uploadSingleTempFile(
+            const res = await uploadSingleFile(
                 {
                     file: item.file,
                     dataType: ds.dataType,
@@ -371,6 +451,7 @@ async function submit() {
 watch(datasetKey, () => {
     msg.value = ''
     uploadResults.value = []
+    uploadingItems.value = []
     if (currentDataset.value.needNode) loadNodes()
 })
 </script>
@@ -388,9 +469,10 @@ watch(datasetKey, () => {
 
 .upload-modal {
     position: relative;
-    width: 540px;
-    max-width: 92vw;
-    max-height: 88vh;
+    width: 760px;
+    /* ← 由 540px 加宽，容纳预览图 */
+    max-width: 94vw;
+    max-height: 90vh;
     display: flex;
     flex-direction: column;
     background: #fff;
@@ -505,7 +587,7 @@ watch(datasetKey, () => {
     background: #fafbfc;
     border-radius: 4px;
     font-size: 12px;
-    max-height: 200px;
+    max-height: 160px;
     overflow-y: auto;
 }
 
@@ -599,6 +681,12 @@ watch(datasetKey, () => {
 .ignored-tip {
     color: #e6a23c;
     font-size: 12px;
+}
+
+.preview-tip {
+    color: #e6a23c;
+    font-size: 12px;
+    margin-left: 6px;
 }
 
 /* ===== 上传进度 ===== */
@@ -720,5 +808,18 @@ watch(datasetKey, () => {
     text-align: right;
     color: #909399;
     font-size: 11px;
+}
+
+.saved-tip {
+    color: #67c23a;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.preview-tip {
+    color: #e6a23c;
+    font-size: 12px;
+    margin-left: 4px;
+    cursor: help;
 }
 </style>

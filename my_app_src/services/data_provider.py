@@ -1,15 +1,18 @@
-"""数据提供者：数据库优先，Excel 临时数据兜底"""
+"""数据提供者：内存预览优先、业务数据库兜底
+
+原「Excel 临时数据兜底」已随临时存储功能一并移除。
+"""
 
 from typing import Optional, Tuple
+
 import pandas as pd
 
-from services.database_provider import fetch_from_database
-from services.temp_manager import TempManager
+from services.database_provider import fetch_record
 
 
 class DataSource:
     DB = "database"
-    EXCEL = "excel"
+    PREVIEW = "preview"
     EMPTY = "empty"
 
 
@@ -18,21 +21,18 @@ def fetch_data(
     sub_type: str,
     date: str,
     node_name: Optional[str] = None,
-) -> Tuple[Optional[pd.DataFrame], str, Optional[str]]:
+) -> Tuple[Optional[pd.DataFrame], str]:
     """
-    返回 (df, source, temp_path)
+    返回 (df, source)
     - df: None 或空表示无数据
-    - source: "database" / "excel" / "empty"
-    - temp_path: 使用 Excel 临时数据时的文件绝对路径
+    - source: "preview" / "database" / "empty"
     """
-    # ① 数据库
-    df = fetch_from_database(data_type, sub_type, date, node_name)
-    if df is not None and not df.empty:
-        return df, DataSource.DB, None
+    points, source = fetch_record(data_type, sub_type, date, node_name)
+    if not points:
+        return None, DataSource.EMPTY
 
-    # ② Excel 兜底
-    df, path = TempManager.load(data_type, sub_type, date, node_name)
-    if df is not None and not df.empty:
-        return df, DataSource.EXCEL, path
+    df = pd.DataFrame([{"time": p["time"], "value": p["value"]} for p in points])
+    if data_type in ("day-ahead", "spread"):
+        df["value"] = pd.to_numeric(df["value"], errors="coerce").round(3)
 
-    return None, DataSource.EMPTY, None
+    return df, source

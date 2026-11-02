@@ -1,6 +1,6 @@
 import { request } from '../request'
 
-export type SettlementTaskType = 'actual' | 'jiaojiang' | 'xiandai'
+export type SettlementTaskType = 'actual' | 'jiaojiang' | 'general'
 
 export interface TaskProgress {
     current: number

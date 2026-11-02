@@ -1,18 +1,20 @@
-"""负荷 / 光伏数据服务：数据库优先 → 临时 Excel 兜底（仅浙江电网）"""
+"""负荷 / 光伏数据服务：内存预览优先、业务数据库兜底（仅浙江电网）
 
-import os
-from typing import Dict, List
+上传入口解析 Excel 后同时写入内存预览与 tmp_curve_data 表，
+本模块读取时同一维度以预览为准，因此刚上传即可显示。
+"""
 
-
-from services.database_provider import fetch_from_database
-from services.load_parser import (
-    TARGET_DEVICE,
-    detect_kind_from_filename,
-    parse_load_excel,
-)
-from services.temp_manager import TempManager
-from utils.dataframe import df_to_points
+from typing import Dict
 from datetime import datetime, timedelta
+
+from services.database_provider import fetch_series
+from services.load_parser import TARGET_DEVICE
+
+
+class DataSource:
+    DB = "database"
+    PREVIEW = "preview"
+    EMPTY = "empty"
 
 
 def _iterate_date_range(start_date: str, end_date: str, max_days: int = 60):
@@ -36,17 +38,12 @@ def _iterate_date_range(start_date: str, end_date: str, max_days: int = 60):
 
 
 def _merge_source(sources: set) -> str:
-    if "excel" in sources:
-        return DataSource.EXCEL
-    if "database" in sources:
+    """预览优先：只要有来自内存预览的数据就标记为 preview"""
+    if DataSource.PREVIEW in sources:
+        return DataSource.PREVIEW
+    if DataSource.DB in sources:
         return DataSource.DB
     return DataSource.EMPTY
-
-
-class DataSource:
-    DB = "database"
-    EXCEL = "excel"
-    EMPTY = "empty"
 
 
 # =========================================================
@@ -54,72 +51,27 @@ class DataSource:
 # =========================================================
 
 
-def _load_temp_dir() -> str:
-    d = os.path.join(TempManager.base_dir(), "load")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _scan_temp_load_files(date: str) -> List[Dict]:
-    """扫描 data/temp/load/ 下所有负荷 Excel，只返回该日期、浙江电网的数据"""
-    items: List[Dict] = []
-    temp_dir = _load_temp_dir()
-
-    for fn in sorted(os.listdir(temp_dir)):
-        if not fn.lower().endswith((".xlsx", ".xls")):
-            continue
-        fp = os.path.join(temp_dir, fn)
-
-        raw_kind = detect_kind_from_filename(fn)
-        if raw_kind in ("pv", "pv_forecast"):
-            continue  # 光伏文件不进入负荷曲线
-
-        try:
-            parsed = parse_load_excel(fp, kind=raw_kind)
-        except Exception as e:
-            print(f"[LoadService] 解析负荷 {fn} 失败: {e}")
-            continue
-
-        for it in parsed:
-            if it["date"] != date:
-                continue
-            it["_file"] = fp
-            it["_filename"] = fn
-            items.append(it)
-
-    return items
-
-
 def fetch_load_data(date: str) -> Dict:
     """获取指定日期的负荷数据（固定浙江电网）"""
-    # 1) 数据库
-    df = fetch_from_database("load", "", date, TARGET_DEVICE)
-    if df is not None and not df.empty:
+    # 同 kind 以最后写入的一条为准（预览覆盖数据库）
+    grouped: Dict[str, Dict] = {}
+    for rec in fetch_series("load", "", date, TARGET_DEVICE):
+        grouped[rec["kind"]] = rec
+
+    if grouped:
         return {
             "date": date,
-            "source": DataSource.DB,
+            "source": _merge_source({r.get("source") for r in grouped.values()}),
             "series": [
                 {
-                    "device": TARGET_DEVICE,
-                    "kind": "actual",
-                    "points": df_to_points(df),
+                    "device": rec.get("device") or TARGET_DEVICE,
+                    "kind": rec["kind"],
+                    "points": rec["points"],
                 }
+                for rec in grouped.values()
             ],
         }
 
-    # 2) 临时 Excel
-    matched = _scan_temp_load_files(date)
-    if matched:
-        grouped: Dict[str, Dict] = {}
-        for it in matched:
-            grouped[it["kind"]] = it  # 同 kind 以最新文件为准
-        return {
-            "date": date,
-            "source": DataSource.EXCEL,
-            "series": list(grouped.values()),
-        }
-
-    # 3) 无数据
     return {
         "date": date,
         "source": DataSource.EMPTY,
@@ -171,102 +123,31 @@ def fetch_load_range(start_date: str, end_date: str) -> Dict:
 # =========================================================
 
 
-def _pv_temp_dir() -> str:
-    d = os.path.join(TempManager.base_dir(), "pv")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _scan_temp_pv_files(date: str) -> List[Dict]:
-    """扫描 pv + load 两个目录中的光伏文件（兼容旧位置）
-    kind ∈ {"pv"（实际）, "pv_forecast"（预测）}
-    """
-    items: List[Dict] = []
-
-    dirs = [
-        _pv_temp_dir(),
-        os.path.join(TempManager.base_dir(), "load"),  # 兼容历史遗留
-    ]
-
-    for d in dirs:
-        if not os.path.isdir(d):
-            continue
-        for fn in sorted(os.listdir(d)):
-            if not fn.lower().endswith((".xlsx", ".xls")):
-                continue
-
-            raw_kind = detect_kind_from_filename(fn)
-            if raw_kind not in ("pv", "pv_forecast"):
-                continue
-
-            fp = os.path.join(d, fn)
-            try:
-                parsed = parse_load_excel(fp, kind=raw_kind)
-            except Exception as e:
-                print(f"[LoadService] 解析光伏 {fn} 失败: {e}")
-                continue
-
-            for it in parsed:
-                if it["date"] != date:
-                    continue
-                it["_file"] = fp
-                it["_filename"] = fn
-                items.append(it)
-
-    print(
-        f"[LoadService] pv 扫描结果：date={date}, "
-        f"匹配 {len(items)} 条 → "
-        f"{[(it['kind'], it['_filename']) for it in items]}"
-    )
-    return items
-
-
 def fetch_pv_data(date: str) -> Dict:
-    """获取指定日期的光伏出力：实际 + 预测（浙江电网）"""
-    # 1) 数据库
-    df = fetch_from_database("pv", "", date, TARGET_DEVICE)
-    if df is not None and not df.empty:
+    grouped: Dict[str, Dict] = {}
+    for rec in fetch_series("pv", "", date, TARGET_DEVICE):
+        grouped[rec["kind"]] = rec
+
+    if not grouped:
         return {
             "date": date,
-            "source": DataSource.DB,
-            "series": [
-                {
-                    "device": TARGET_DEVICE,
-                    "kind": "pv",
-                    "points": df_to_points(df),
-                }
-            ],
+            "source": DataSource.EMPTY,
+            "series": [],
         }
 
-    # 2) 临时 Excel：按 kind 去重（同 kind 以最新文件为准）
-    matched = _scan_temp_pv_files(date)
-    if matched:
-        grouped: Dict[str, Dict] = {}
-        for it in matched:
-            grouped[it["kind"]] = it
-
-        series_list = [
-            {
-                "device": it["device"] or TARGET_DEVICE,
-                "kind": it["kind"],
-                "points": it["points"],
-            }
-            for it in grouped.values()
-        ]
-        # 实际在前、预测在后
-        series_list.sort(key=lambda s: 0 if s["kind"] == "pv" else 1)
-
-        return {
-            "date": date,
-            "source": DataSource.EXCEL,
-            "series": series_list,
-        }
-
-    # 3) 无数据
+    ordered = sorted(grouped.values(), key=lambda r: 0 if r["kind"] == "pv" else 1)
     return {
         "date": date,
-        "source": DataSource.EMPTY,
-        "series": [],
+        # ⚠ 修复：原来是 DataSource.DB 写死，导致预览数据被错标为 DB
+        "source": _merge_source({r.get("source") for r in grouped.values()}),
+        "series": [
+            {
+                "device": rec.get("device") or TARGET_DEVICE,
+                "kind": rec["kind"],
+                "points": rec["points"],
+            }
+            for rec in ordered
+        ],
     }
 
 

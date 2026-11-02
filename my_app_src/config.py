@@ -25,16 +25,14 @@ class Config:
     # ---------- 上传 ----------
     MAX_CONTENT_LENGTH = _int("MAX_UPLOAD_MB", 50) * 1024 * 1024
 
-    # ---------- Excel 数据目录 ----------
+    # ---------- 数据目录（非 Excel 业务文件：节点清单、模板、配置等） ----------
     DATA_DIR = os.path.join(BASE_DIR, "data")
-    LOAD_DIR = os.path.join(DATA_DIR, "load")
-    PRICE_DIR = os.path.join(DATA_DIR, "price")
-    SPREAD_DIR = os.path.join(DATA_DIR, "spread")
-    SETTLEMENT_DIR = os.path.join(DATA_DIR, "settlement")
-    MONTHLY_DIR = os.path.join(DATA_DIR, "monthly")
 
     JSON_AS_ASCII = False
-    # ---------- 临时数据 ----------
-    TEMP_DATA_DIR = os.path.join(DATA_DIR, "temp")
-    TEMP_AUTO_CLEAN = _bool("TEMP_AUTO_CLEAN", True)
-    TEMP_CLEAN_INTERVAL = _int("TEMP_CLEAN_INTERVAL", 300)  # 秒
+
+    # ---------- 业务数据库（上传解析后的数据入库、各模块读取的唯一来源） ----------
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = _int("DB_PORT", 3306)
+    DB_USER = os.getenv("DB_USER", "root")
+    DB_PASS = os.getenv("DB_PASS", "")
+    DB_NAME = os.getenv("DB_NAME", "power_tool")

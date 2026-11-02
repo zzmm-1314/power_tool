@@ -1,4 +1,4 @@
-export type DataSource = 'database' | 'excel' | 'empty'
+export type DataSource = 'database' | 'preview' | 'empty'
 /** 通用接口返回结构 */
 export interface ApiResult<T = unknown> {
     code: number
@@ -38,7 +38,6 @@ export interface PriceData {
     nodeType: 'unified' | 'plant'
     nodeName?: string
     source: DataSource
-    tempPath: string | null
     points: PricePoint[]
     raw?: PricePoint[]
 }
@@ -49,12 +48,11 @@ export interface SpreadData {
     nodeType: 'unified' | 'plant'
     nodeName?: string
     source: DataSource
-    tempPath: string | null
     points: CurvePoint[]
 }
 
 /** 结算单类型 */
-export type SettlementType = 'actual' | 'jiaojiang' | 'xiandai'
+export type SettlementType = 'actual' | 'jiaojiang' | 'general'
 
 export interface SettlementUpdateResult {
     type: SettlementType

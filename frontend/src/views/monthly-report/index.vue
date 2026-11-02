@@ -13,7 +13,7 @@
                 <span class="step-num">1</span> 选择 Word 模板
             </h3>
             <p class="hint">
-                模板放在 <code>temp/monthly/templates/</code> 下，支持 docxtpl 占位符（如
+                模板放在 <code>data/monthly/templates/</code> 下，支持 docxtpl 占位符（如
                 <code>&#123;&#123; plant_name &#125;&#125;</code>）。
             </p>
             <div class="row">

@@ -11,7 +11,7 @@ export const useAppStore = defineStore('app', () => {
     /** 上传弹窗打开时预选的数据类型 key */
     const uploadInitialKey = ref<string>('')
 
-    /** 数据版本号：上传 / 删除临时文件后 +1，各页面 watch 它自动刷新 */
+    /** 数据版本号：导入数据后 +1，各页面 watch 它自动刷新 */
     const dataVersion = ref(0)
 
     function toggleSidebar() {

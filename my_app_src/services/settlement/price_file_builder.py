@@ -1,8 +1,11 @@
-"""从数据目录构建结算单所需的「分时价格（现货）」Excel
+"""从业务数据库构建结算单所需的「分时价格（现货）」Excel
 输出格式（兼容 sim_v1 / sim_v2 的读取逻辑）：
 - 第 3 行：日期表头（col 3, 6, 9...，每日期占 3 列）
 - 第 5-52 行：日前价格在日期列本身
 - 第 5-52 行：实时价格在日期列 + 1 列（仅 with_real_time）
+
+数据来源：业务数据库（原 data/temp 临时 Excel 存储已删除）。
+生成的工作表属于中间产物，存放于 data/settlement_workspace，仅保留 24 小时。
 """
 
 import os
@@ -14,12 +17,15 @@ from typing import Dict, List, Optional
 import openpyxl
 from openpyxl.styles import Font
 
+from config import Config
 from services.day_ahead_parser import (
     _norm_time,
     _time_to_slot_index,
-    parse_unified_price_excel,
 )
-from services.day_ahead_service import TempManager, read_node_excel
+from services.day_ahead_service import (
+    load_node_items,
+    load_unified_items,
+)
 
 # ============================================================
 #                    基础工具
@@ -58,13 +64,13 @@ def _raw_to_48(raw: List[Dict]) -> List[Optional[float]]:
 
 
 def _workspace_dir() -> str:
-    d = os.path.join(TempManager.base_dir(), "_settlement_workspace")
+    d = os.path.join(Config.DATA_DIR, "settlement_workspace")
     os.makedirs(d, exist_ok=True)
     return d
 
 
 def _cleanup_old_files(workspace: str, max_age_hours: int = 24) -> None:
-    """清理超过指定时长的旧临时文件"""
+    """清理超过指定时长的旧工作表文件"""
     now = time.time()
     try:
         for fn in os.listdir(workspace):
@@ -79,34 +85,17 @@ def _cleanup_old_files(workspace: str, max_age_hours: int = 24) -> None:
 
 
 # ============================================================
-#                    数据加载
+#                    数据加载（数据库）
 # ============================================================
 
 
 def _load_unified(dates: List[str]) -> Dict[str, List[Optional[float]]]:
-    """从 temp/day-ahead/unified 读日前统一结算点
-    返回 {date: [48 点]}
-    """
-    base = os.path.join(TempManager.base_dir(), "day-ahead", "unified")
-    if not os.path.isdir(base):
-        return {}
-
+    """日前统一结算点 → {date: [48 点]}"""
     date_set = set(dates)
     result: Dict[str, List[Optional[float]]] = {}
-
-    for fn in sorted(os.listdir(base)):
-        if not fn.lower().endswith((".xlsx", ".xls")):
-            continue
-        fp = os.path.join(base, fn)
-        try:
-            items = parse_unified_price_excel(fp)
-        except Exception as e:
-            print(f"[PriceBuilder] 解析 {fn} 失败: {e}")
-            continue
-        for it in items:
-            if it["date"] in date_set and it["date"] not in result:
-                result[it["date"]] = _raw_to_48(it["raw"])
-
+    for it in load_unified_items():
+        if it["date"] in date_set:
+            result[it["date"]] = _raw_to_48(it["raw"])
     return result
 
 
@@ -121,7 +110,7 @@ def _load_node_pair(
 
     # 日前节点
     try:
-        day_items = read_node_excel(node_name, base_subdir="day-ahead/plant")
+        day_items = load_node_items(node_name, base_subdir="day-ahead/plant")
     except Exception:
         day_items = []
     for it in day_items:
@@ -130,7 +119,7 @@ def _load_node_pair(
 
     # 实时节点
     try:
-        rt_items = read_node_excel(node_name, base_subdir="spread/plant")
+        rt_items = load_node_items(node_name, base_subdir="spread/plant")
     except Exception:
         rt_items = []
     for it in rt_items:
@@ -193,7 +182,7 @@ def _write_price_sheet(
 
 def build_unified_file(start_date: str, end_date: str) -> Dict:
     """日前统一结算点 → 「分时价格（现货）」Excel
-    用于椒江 info_file / 现代 info_contract_file
+    用于椒江 info_file / 通用 info_contract_file
     """
     dates = _date_list(start_date, end_date)
     if not dates:
@@ -203,7 +192,7 @@ def build_unified_file(start_date: str, end_date: str) -> Dict:
     if not data:
         return {
             "ok": False,
-            "error": "数据目录「day-ahead/unified」中无日前统一结算点数据",
+            "error": "数据库中没有该范围的日前统一结算点数据，请先上传导入",
         }
 
     workspace = _workspace_dir()
@@ -218,7 +207,7 @@ def build_unified_file(start_date: str, end_date: str) -> Dict:
 
 def build_plant_pair_file(node_name: str, start_date: str, end_date: str) -> Dict:
     """节点（日前 + 实时） → 「分时价格（现货）」Excel
-    用于现代 info_spot_file
+    用于通用 info_spot_file
     """
     if not node_name:
         return {"ok": False, "error": "缺少节点名"}
@@ -231,7 +220,7 @@ def build_plant_pair_file(node_name: str, start_date: str, end_date: str) -> Dic
     if not data:
         return {
             "ok": False,
-            "error": f"节点「{node_name}」在范围内无日前/实时数据",
+            "error": f"节点「{node_name}」在范围内无日前/实时数据，请先上传导入",
         }
 
     workspace = _workspace_dir()

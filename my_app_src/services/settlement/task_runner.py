@@ -84,7 +84,7 @@ def run_task(task_id: str, task_type: str, params: dict):
                 progress_func=progress_func,
             )
 
-        elif task_type == "xiandai":
+        elif task_type == "general":
             fill_simulation_data_v2(
                 spot_file=params["spot_file"],
                 stat_file=params["stat_file"],

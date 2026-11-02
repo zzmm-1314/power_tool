@@ -1,16 +1,18 @@
-"""从项目数据目录构建价差 DataFrame（date + '0'..'47'）"""
+"""从业务数据库构建价差 DataFrame（date + '0'..'47'）
 
-import os
+原从 data/temp 下的 Excel 读取，该临时存储功能已删除。
+"""
+
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
-from services.day_ahead_service import read_node_excel
+from services.day_ahead_service import load_node_items
 from services.price_spread_service import (
     _raw_to_slots,
-    _scan_spread_unified_files,
-    _scan_unified_temp_files,
+    load_spread_unified_items,
+    load_unified_items,
 )
 
 
@@ -33,18 +35,18 @@ def build_gap_df(
 ) -> pd.DataFrame:
     """
     构建价差 DataFrame：
-      - unified：temp/day-ahead/unified + temp/spread/unified
-      - plant  ：temp/day-ahead/plant/{node} + temp/spread/plant/{node}
+      - unified：日前统一结算点 + 实时统一结算点
+      - plant  ：日前节点 + 实时节点
     返回列：date, '0'..'47'
     """
     if node_type == "unified":
-        day_items = _scan_unified_temp_files()
-        rt_items = _scan_spread_unified_files()
+        day_items = load_unified_items()
+        rt_items = load_spread_unified_items()
     else:
         if not node_name:
             raise ValueError("节点类型必须提供 node_name")
-        day_items = read_node_excel(node_name, base_subdir="day-ahead/plant")
-        rt_items = read_node_excel(node_name, base_subdir="spread/plant")
+        day_items = load_node_items(node_name, base_subdir="day-ahead/plant")
+        rt_items = load_node_items(node_name, base_subdir="spread/plant")
 
     day_map = _items_to_slots_map(day_items)
     rt_map = _items_to_slots_map(rt_items)

@@ -62,6 +62,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/contract/RollingProfit.vue'),
         meta: { title: '中长期合约 / 滚撮收益模拟' },
       },
+      {
+        path: 'contract/cross-province-profit',
+        name: 'CrossProvinceProfit',
+        component: () => import('@/views/contract/CrossProvinceProfit.vue'),
+        meta: { title: '中长期合约 / 长三角省间交易收益模拟' },
+      },
       // 结算单更新
       {
         path: 'settlement/actual',
@@ -76,10 +82,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '结算单更新 / 椒江模拟结算单更新' },
       },
       {
-        path: 'settlement/xiandai',
-        name: 'SettlementXiandai',
-        component: () => import('@/views/settlement/XiandaiSim.vue'),
-        meta: { title: '结算单更新 / 现代模拟结算单更新' },
+        path: 'settlement/general',
+        name: 'SettlementGeneral',
+        component: () => import('@/views/settlement/generalSim.vue'),
+        meta: { title: '结算单更新 / 通用模拟结算单更新' },
       },
 
       {

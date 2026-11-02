@@ -20,16 +20,39 @@ else:
     APP_ROOT = Path(__file__).resolve().parent.parent
 
 STATIC_DIR = APP_ROOT / "static"
+# 全局记录最后一次心跳的时间
+LAST_HEARTBEAT_TIME = time.time()
 
 
-def is_production() -> bool:
-    """exe 打包后强制生产模式；开发环境看 FLASK_ENV"""
+def _detect_mode() -> tuple[bool, str]:
+    """
+    自动识别运行模式，返回 (是否生产模式, 判定依据)：
+    1. PyInstaller 打包（exe）→ 强制生产模式
+    2. 显式设置 POWER_TOOL_MODE / FLASK_ENV → 尊重环境变量
+       （production|prod → 生产；development|dev → 开发）
+    3. 未设置 → 自动判断：存在 static/index.html 构建产物则按生产
+       模式运行（直接访问 http://127.0.0.1:<port>/ 即可），
+       否则按开发模式运行（后端只供 API，前端用 Vite）
+    """
     if getattr(sys, "frozen", False):
-        return True
-    return os.getenv("FLASK_ENV", "development").lower() == "production"
+        return True, "自动识别：打包模式（sys.frozen）"
+
+    for var in ("POWER_TOOL_MODE", "FLASK_ENV"):
+        val = os.getenv(var)
+        if val:
+            v = val.strip().lower()
+            if v in ("production", "prod"):
+                return True, f"环境变量 {var}={val}"
+            if v in ("development", "dev"):
+                return False, f"环境变量 {var}={val}"
+            print(f"[env] 忽略无法识别的 {var}={val!r}", flush=True)
+
+    if (STATIC_DIR / "index.html").is_file():
+        return True, "自动识别：检测到 static/index.html 构建产物 → 生产模式"
+    return False, "自动识别：无 static 构建产物 → 开发模式"
 
 
-IS_PROD = is_production()
+IS_PROD, MODE_REASON = _detect_mode()
 
 
 # ==================== 开发提示页 ====================
@@ -79,6 +102,39 @@ a:hover{text-decoration:underline;}
 </body></html>"""
 
 
+def register_heartbeat(app):
+    @app.route("/api/heartbeat", methods=["GET", "POST"])
+    def heartbeat():
+        global LAST_HEARTBEAT_TIME
+        LAST_HEARTBEAT_TIME = time.time()
+        return jsonify({"code": 0, "msg": "ok"})
+
+
+def start_watchdog(grace_period=15, timeout=30):
+    """
+    启动看门狗线程，超时未收到心跳则强制退出进程
+    grace_period: 初始宽限期（防止启动时前端还未加载）
+    timeout: 无心跳超时时间
+    """
+    global LAST_HEARTBEAT_TIME
+    LAST_HEARTBEAT_TIME = time.time() + grace_period
+
+    def _watchdog_loop():
+        global LAST_HEARTBEAT_TIME
+        while True:
+            time.sleep(5)
+            if time.time() - LAST_HEARTBEAT_TIME > timeout:
+                print(
+                    f"\n[Watchdog] 超过 {timeout} 秒未收到前端心跳，页面可能已关闭。自动退出进程...",
+                    flush=True,
+                )
+                # 必须用 os._exit 强制终止，因为 Flask 主线程还在阻塞中
+                os._exit(0)
+
+    t = threading.Thread(target=_watchdog_loop, daemon=True, name="HeartbeatWatchdog")
+    t.start()
+
+
 # ==================== create_app ====================
 def create_app() -> Flask:
     app = Flask(
@@ -91,13 +147,14 @@ def create_app() -> Flask:
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     register_blueprints(app)
-
+    register_heartbeat(app)
     index_html = STATIC_DIR / "index.html"
     static_ready = index_html.is_file()
 
     # ===== 启动诊断 =====
     print("=" * 60, flush=True)
     print(f"[env] IS_PROD       = {IS_PROD}", flush=True)
+    print(f"[env] MODE_REASON   = {MODE_REASON}", flush=True)
     print(f"[env] APP_ROOT      = {APP_ROOT}", flush=True)
     print(f"[env] STATIC_DIR    = {STATIC_DIR}", flush=True)
     print(f"[env] static_ready  = {static_ready}", flush=True)
@@ -124,12 +181,29 @@ def create_app() -> Flask:
             print(f"[prod] 静态资源就绪：{STATIC_DIR}", flush=True)
 
     # ===== SPA / 开发提示兜底 =====
-    @app.route("/", defaults={"path": ""})
-    @app.route("/<path:path>")
+    # 注意：这里必须接受所有方法。若只声明 GET，未注册的 API 请求（如 POST）
+    # 会被 Werkzeug 判成 405 Method Not Allowed（Allow: GET, HEAD, OPTIONS），
+    # 排查时极易误判成"接口方法不对"，实际是路由不存在 / 前后端版本不一致。
+    @app.route(
+        "/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
+    )
+    @app.route("/<path:path>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def serve_spa(path):
-        # API 路径不拦截
+        # API 路径不拦截，直接给出可读的 404 提示
         if path.startswith("api/"):
-            return jsonify({"code": 404, "msg": "接口不存在", "data": None}), 404
+            return (
+                jsonify(
+                    {
+                        "code": 404,
+                        "msg": (
+                            f"接口 /{path} 不存在。若为上传请求，请确认后端已重启、"
+                            "且前端已重新构建（旧构建产物仍在请求已下线的 /api/temp-data）"
+                        ),
+                        "data": None,
+                    }
+                ),
+                404,
+            )
 
         # 真实静态文件直接返回（生产模式或开发模式都允许）
         if path and static_ready:

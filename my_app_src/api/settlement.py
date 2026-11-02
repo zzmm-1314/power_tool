@@ -13,9 +13,10 @@ settlement_bp = Blueprint("settlement", __name__)
 @settlement_bp.post("/start/<task_type>")
 def start(task_type: str):
     """启动结算任务
-    支持 task_type: actual / jiaojiang / xiandai
+    支持 task_type: actual / jiaojiang / general
     """
-    if task_type not in ("actual", "jiaojiang", "xiandai"):
+
+    if task_type not in ("actual", "jiaojiang", "general"):
         return fail(f"不支持的任务类型: {task_type}")
 
     data = request.get_json(silent=True) or {}
@@ -36,7 +37,7 @@ def start(task_type: str):
             "tenday_mid",
             "tenday_late",
         ],
-        "xiandai": [
+        "general": [
             "spot_file",
             "stat_file",
             "strategy_file",

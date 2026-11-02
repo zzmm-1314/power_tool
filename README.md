@@ -1,6 +1,6 @@
 # 电力工具助手
 
-一个面向电力交易业务的桌面工具集，覆盖负荷 / 光伏分析、日前电价、价差分析、结算单更新、月报自动填充、统调电厂、申报系数预测与滚撮分析。支持 Excel 临时数据兜底、自动清理、节点维护、多文件上传、存储目录迁移，并可作为 Windows exe 分发与增量更新。
+一个面向电力交易业务的桌面工具集，覆盖负荷 / 光伏分析、日前电价、价差分析、结算单更新、月报自动填充、统调电厂、申报系数预测与滚撮分析。上传的 Excel 即时解析入库作为唯一数据来源，支持节点维护、多文件上传，并可作为 Windows exe 分发与增量更新。
 
 ---
 
@@ -10,13 +10,13 @@
 
 - 双标签：**负荷曲线** / **光伏出力**，共用日期范围与上传入口
 - 支持多日曲线**首尾拼接**（实际一条、预测一条），单日显示差值柱状图（预测 − 实际，次坐标轴）
-- 96 点 / 48 点按文件格式自动识别，支持 Excel 临时兜底
+- 96 点 / 48 点按文件格式自动识别，数据入库后按日期查询
 
 ### 日前电价
 
 - **统一结算点**：48 点换算 24 点小时均价，按“行=小时、列=日期”展示红黄色阶表格，底部含日均值与总均值
 - **电厂节点**：节点下拉选择，展示该节点各日期的 24 点热力图表格
-- **节点编辑**：新增 / 编辑 / 删除 / 批量新增 / 批量删除；节点重命名或删除时同步管理节点 Excel
+- **节点编辑**：新增 / 编辑 / 删除 / 批量新增 / 批量删除；节点重命名或删除时同步处理库内该节点的价格数据
 
 ### 价差分析
 
@@ -28,19 +28,19 @@
 
 - **实际结算单更新**：按日期范围解析明细文件夹，填充信息汇总与结算明细
 - **椒江模拟结算单**：固定申报功率、旬度策略、中长期持仓等参考文件
-- **现代模拟结算单**：现货申报、月度策略、日前实时参考、合约参考等
+- **通用模拟结算单**：现货申报、月度策略、日前实时参考、合约参考等
 - 「信息参考 / 日前实时参考 / 合约参考」可从数据目录自动生成
 - 后台任务异步执行，前端实时进度与日志
 
 ### 月报数据填充
 
-- Word 模板托管在 `data/temp/monthly/templates/`
+- Word 模板托管在 `my_app_src/data/monthly/templates/`
 - 上传结算单 PDF 自动解析 100+ 字段，预览后一键生成 Word 月报
 - 支持结算电费大写 `{{settlement_fee.cn}}`
 
 ### 统调电厂
 
-- Excel 一键导入，数据存于 `temp/unified-plants/`
+- Excel 一键导入，数据存于 `my_app_src/data/unified-plants/统调电厂.xlsx`
 - 左侧浙江省地图：按市聚合铭牌出力，颜色由浅红到深红
 - 右侧分页表格，支持搜索、城市筛选、按市汇总（含占比进度条）
 
@@ -58,12 +58,12 @@
 - 双图：价格曲线、买1价/卖1价与日前均价价差柱
 - 一键导出 Excel（含色阶填色）
 
-### 临时数据与上传
+### 数据导入
 
 - 多文件逐个上传，显示每个文件进度与总进度
 - 上传模态窗按数据类型预选（负荷 / 光伏 / 日前统一 / 日前节点 / 实时 / 价差节点）
-- 数据目录可运行时切换，可选迁移旧文件
-- 后台清理任务：数据库中有数据后自动删除对应 Excel（数据库接入前为空操作）
+- 上传的 Excel 只做即时解析，解析结果写入业务数据库表 `tmp_curve_data`，项目目录不再保存副本
+- 各模块统一从数据库读取，数据来源标识只有「数据库」与「暂无数据」两种
 
 ---
 
@@ -72,7 +72,7 @@
 | 层       | 技术                                                                    |
 | -------- | ----------------------------------------------------------------------- |
 | 前端     | Vue 3 + TypeScript + Vite + Pinia + Vue Router + ECharts + vue-echarts  |
-| 后端     | Flask + Flask-Cors + python-dotenv                                      |
+| 后端     | Flask + Flask-Cors + python-dotenv + PyMySQL                          |
 | 数据处理 | pandas、openpyxl、pdfplumber、docxtpl、BeautifulSoup4、lxml             |
 | 预测模块 | scikit-learn（Ridge）、numpy、pandas                                    |
 | 打包     | PyInstaller（onedir / onefile）+ desktop-app-source-updater（增量更新） |
@@ -85,8 +85,7 @@
 power-tool/
 ├── my_app_src/
 │   ├── app.py                        # Flask 入口
-│   ├── config.py                     # 读取 .env
-│   ├── extensions.py                 # 预留数据库扩展（当前未启用）
+│   ├── config.py                     # 读取 .env（含数据库连接配置）
 │   ├── requirements.txt
 │   ├── .env / .env.example
 │   ├── api/
@@ -96,7 +95,7 @@ power-tool/
 │   │   ├── spread.py                 # 价差分析
 │   │   ├── settlement.py             # 结算单更新
 │   │   ├── monthly.py                # 月报填充
-│   │   ├── temp_data.py              # 临时数据上传/删除/扫描/配置
+│   │   ├── upload.py                 # 数据导入（Excel 即时解析入库）
 │   │   ├── nodes.py                  # 节点 CRUD
 │   │   ├── unified_plants.py         # 统调电厂
 │   │   ├── coefficient.py            # 申报系数预测
@@ -104,15 +103,14 @@ power-tool/
 │   ├── services/
 │   │   ├── load_service.py           # 负荷/光伏读取与范围聚合
 │   │   ├── load_parser.py            # 96 点解析
-│   │   ├── day_ahead_service.py      # 日前 48→24、节点读写、热力图
+│   │   ├── day_ahead_service.py      # 日前 48→24、热力图构建、库内取数
 │   │   ├── day_ahead_parser.py       # 48 点价格解析
 │   │   ├── price_spread_service.py   # 48 点价差、日均价
-│   │   ├── settlement/               # 实际/椒江/现代结算单
+│   │   ├── settlement/               # 实际/椒江/通用结算单
 │   │   ├── monthly_service.py        # 月报模板与渲染
-│   │   ├── node_manager.py           # 节点列表与文件同步
-│   │   ├── temp_manager.py           # 临时文件路径与列表
-│   │   ├── storage_config.py         # 存储目录配置与迁移
-│   │   ├── cleanup_task.py           # 后台自动清理
+│   │   ├── node_manager.py           # 节点列表与库内数据同步
+│   │   ├── db_store.py               # 业务库读写（上传点位入库 / 查询）
+│   │   ├── database_provider.py      # 统一取数接口
 │   │   ├── unified_plant_service.py  # 统调电厂解析与地图聚合
 │   │   ├── rolling_analysis.py       # 滚撮分析
 │   │   └── coefficient/              # 申报系数预测（原独立工具迁移）
@@ -124,19 +122,11 @@ power-tool/
 │   │   ├── number_format.py
 │   │   └── pdf_parser.py             # 月报 PDF 解析
 │   └── data/
-│       ├── storage_config.json       # 存储目录指针（不迁移）
-│       └── temp/                     # 临时数据根目录（可迁移）
-│           ├── plant_nodes.json
-│           ├── load/
-│           ├── pv/
-│           ├── day-ahead/
-│           │   ├── unified/
-│           │   └── plant/{节点}.xlsx
-│           ├── spread/
-│           │   ├── unified/
-│           │   └── plant/{节点}.xlsx
-│           ├── monthly/templates/
-│           └── unified-plants/统调电厂.xlsx
+│       ├── plant_nodes.json          # 节点清单（由「节点编辑」维护）
+│       ├── monthly/templates/        # 月报 Word 模板
+│       ├── unified-plants/统调电厂.xlsx
+│       ├── contract/                 # 合约配置（典型曲线 / 节假日 / 节点）
+│       └── settlement_workspace/     # 结算分时价格工作表（中间产物，超 24h 自动清理）
 ├── frontend/
 │   ├── public/geo/zhejiang.json      # 浙江省 GeoJSON（需自行下载）
 │   ├── src/
@@ -204,19 +194,23 @@ SECRET_KEY=change-me
 # 上传
 MAX_UPLOAD_MB=50
 
-# 临时数据自动清理
-TEMP_AUTO_CLEAN=true
-TEMP_CLEAN_INTERVAL=300
+# 业务数据库（上传解析后的数据入库、各模块取数的唯一来源）
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASS=change-me
+DB_NAME=power_tool
 ```
 
 说明：
 
-| 变量                    | 说明                                |
-| ----------------------- | ----------------------------------- |
-| `FLASK_PORT`          | 后端端口，默认 5000                 |
-| `MAX_UPLOAD_MB`       | 单次请求最大上传体积                |
-| `TEMP_AUTO_CLEAN`     | 是否启用临时 Excel 自动清理后台线程 |
-| `TEMP_CLEAN_INTERVAL` | 清理扫描间隔（秒）                  |
+| 变量                    | 说明                                       |
+| ----------------------- | ------------------------------------------ |
+| `FLASK_PORT`          | 后端端口，默认 5000                        |
+| `MAX_UPLOAD_MB`       | 单次请求最大上传体积                       |
+| `DB_HOST` / `DB_PORT` | 业务数据库地址与端口                       |
+| `DB_USER` / `DB_PASS` | 数据库账号与密码                           |
+| `DB_NAME`             | 数据库名，首次启动自动建表 `tmp_curve_data` |
 
 前端如需修改 API 地址，可在 `frontend/.env.development` 中配置：
 
@@ -228,26 +222,32 @@ VITE_API_BASE_URL=/api
 
 ## 数据目录与存储
 
-### 存储目录切换
+### 数据来源
 
-- 默认临时数据根目录为 `backend/data/temp`
-- 运行时可在「临时数据」面板点击「⚙ 存储目录」切换，可选择是否迁移旧文件
-- 指针保存在 `backend/data/storage_config.json`，**该文件不迁移**，始终留在 `data/` 下
-- `plant_nodes.json` 位于临时数据根目录，随迁移一起移动
+- 数据读取链路：**上传 Excel → 即时解析 → 写入数据库表 `tmp_curve_data` → 各模块查库**
+- 上传的文件只在系统临时目录里被解析一次，解析完立即删除，项目目录不保留副本
+- 负荷 / 光伏 / 日前统一结算点 / 实时统一结算点：按（类型 + 设备 + 日期）整体替换入库
+- 日前电厂节点 / 实时电厂节点：按（类型 + 节点名 + 日期）写入 48 个点位
+- 数据库连接不可用时，接口返回空数据并在控制台打印 `[DbStore]` 错误日志
 
-### 临时数据规则
+### 本地数据目录
 
-- 数据读取优先级：**数据库（预留）→ 临时 Excel → 空**
-- 上传后即生成临时 Excel；数据库接入并存在数据后，后台任务会自动删除对应临时文件
-- 负荷 / 光伏 / 日前统一结算点 / 实时统一结算点：原样保存上传文件
-- 日前电厂节点 / 实时电厂节点：按节点生成 `<节点名>.xlsx`，行为 48 点时间、列为日期
-- 统调电厂：固定保存为 `unified-plants/统调电厂.xlsx`
+`my_app_src/data/` 只存放非 Excel 曲线数据的正式文件：
+
+| 位置 | 内容 | 维护入口 |
+| --- | --- | --- |
+| `plant_nodes.json` | 节点清单 | 「节点编辑」页面 |
+| `monthly/templates/` | 月报 Word 模板 | 「月报填充」页面上传 |
+| `unified-plants/统调电厂.xlsx` | 统调电厂数据 | 「统调电厂」页面导入 |
+| `contract/` | 典型曲线、节假日、节点合约配置 | 「设置 - 中长期合约配置」 |
+| `settlement_workspace/` | 结算分时价格工作表（中间产物，超 24 小时自动清理） | 结算单任务自动生成 |
+| `storage_config.json` | 历史遗留文件，已不生效，可自行删除 | — |
 
 ### 节点管理
 
-- 节点唯一来源为 `temp/plant_nodes.json`，由「节点编辑」维护
+- 节点唯一来源为 `data/plant_nodes.json`，由「节点编辑」维护
 - 上传日前 / 实时节点价格时只处理已录入节点，未录入节点会被忽略并在结果中提示
-- 节点重命名或删除时，同步重命名或删除 `day-ahead/plant/{节点}.xlsx` 与 `spread/plant/{节点}.xlsx`
+- 节点重命名时同步更新库内该节点的价格数据；删除节点会一并清除其库内数据（不可恢复）
 
 ---
 
@@ -295,7 +295,7 @@ VITE_API_BASE_URL=/api
 | 价差分析     | `/api/spread`         | `/analysis`、`/unified-heatmap`、`/plant-heatmap`、`/daily-prices`                                        |
 | 结算单更新   | `/api/settlement`     | `/start/<type>`、`/tasks/<id>`、`/parse-paths`、`/browse-file`、`/browse-folder`、`/build-price-file` |
 | 月报填充     | `/api/monthly`        | `/templates`、`/parse`、`/generate`                                                                         |
-| 临时数据     | `/api/temp-data`      | `/upload`、`/list`、`/delete`、`/scan`、`/config`                                                       |
+| 数据导入     | `/api/upload`           | `POST /api/upload`（Excel 即时解析入库）                                                                 |
 | 节点管理     | `/api/nodes`          | `/plant`、`/plant/batch`                                                                                      |
 | 统调电厂     | `/api/unified-plants` | `/import`、`/list`、`/map`、`/cities`                                                                     |
 | 申报系数预测 | `/api/coefficient`    | `/predict`、`/progress/<id>`、`/weather-config`                                                             |
@@ -390,11 +390,12 @@ frontend/public/geo/zhejiang.json
 
 检查 `frontend/public/geo/zhejiang.json` 是否存在且为合法 JSON。前端会回退到 CDN，但生产环境建议本地托管。
 
-### 上传后临时数据面板没有文件
+### 上传成功但页面没有数据
 
-- 检查存储目录是否切换到了其他位置（「⚙ 存储目录」查看当前路径）
-- 检查后端进程是否有目录写权限
-- 查看后端控制台是否有 `[TempManager]` 或 `[Cleanup]` 相关日志
+- 确认数据库可连通（`.env` 中 `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME`）
+- 查看后端控制台是否有 `[DbStore]` 开头的日志：初始化建表失败或查询失败都会打印在此
+- 首次启动会自动创建表 `tmp_curve_data`；若账号没有建表权限，需要手工执行建表语句
+- 文件名需带 `YYYYMMDD` 日期，否则解析不到日期会报「未解析到有效数据」
 
 ### 价差分析没有数据
 
@@ -404,7 +405,7 @@ frontend/public/geo/zhejiang.json
 - 实时统一结算点或对应节点已有数据
 - 日期范围包含该日期
 
-### 现代模拟结算单提示“未找到汇总工作表”
+### 通用模拟结算单提示“未找到汇总工作表”
 
 目标文件 sheet 名称需包含「模拟结算」和「汇总」字样，或精确为 `模拟结算汇总表` / `模拟结算汇总`。后端会给出当前工作簿的 sheet 列表。
 
@@ -430,7 +431,7 @@ frontend/public/geo/zhejiang.json
 ## 说明
 
 - 登录 / 注册与权限模块当前已移除；节点权限以「节点编辑」维护的节点列表为准
-- 数据库接入为预留状态，当前数据全部来自临时 Excel 与数据目录
+- 曲线类数据（负荷 / 光伏 / 电价 / 价差）唯一来源是业务数据库表 `tmp_curve_data`，原临时 Excel 存储功能已删除
 - 所有价格类数据统一保留 3 位小数展示
 
 ---

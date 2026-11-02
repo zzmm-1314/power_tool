@@ -1,4 +1,4 @@
-"""现代模拟结算单更新（原 sim_v2.py）"""
+"""通用模拟结算单更新（原 sim_v2.py）"""
 
 import os
 import re

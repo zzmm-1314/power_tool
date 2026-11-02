@@ -1,5 +1,6 @@
 """节点列表管理：新增 / 修改 / 删除 / 查询
-节点列表文件放 temp/plant_nodes.json，随临时数据根目录一起迁移。
+节点清单存放于 data/plant_nodes.json（正式业务数据，不属于临时存储）。
+节点的价格数据存在业务数据库中，改名 / 删除时同步更新数据库。
 """
 
 import json
@@ -9,14 +10,16 @@ import threading
 from datetime import datetime
 from typing import List, Optional
 
-from services.temp_manager import TempManager, _safe
+from config import Config
+from services.db_store import delete_node_data, rename_node
 
 NODE_FILENAME = "plant_nodes.json"
 
 _OLD_NODE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data",
-    "plant_nodes.json",
+    "temp",
+    NODE_FILENAME,
 )
 
 _INVALID = re.compile(r'[\\/:*?"<>|]')
@@ -24,23 +27,7 @@ _lock = threading.Lock()
 
 
 def _node_file() -> str:
-    return os.path.join(TempManager.base_dir(), NODE_FILENAME)
-
-
-def _node_excel_file(name: str) -> str:
-    return os.path.join(
-        TempManager.base_dir(), "day-ahead", "plant", f"{_safe(name)}.xlsx"
-    )
-
-
-def _node_excel_files(name: str) -> list:
-    """节点在两个业务目录下的 Excel 路径列表"""
-    return [
-        os.path.join(
-            TempManager.base_dir(), "day-ahead", "plant", f"{_safe(name)}.xlsx"
-        ),
-        os.path.join(TempManager.base_dir(), "spread", "plant", f"{_safe(name)}.xlsx"),
-    ]
+    return os.path.join(Config.DATA_DIR, NODE_FILENAME)
 
 
 def _validate_name(name: str) -> Optional[str]:
@@ -51,8 +38,6 @@ def _validate_name(name: str) -> Optional[str]:
         return "节点名不能超过 64 字符"
     if _INVALID.search(name):
         return '节点名不能包含 \\ / : * ? " < > | 字符'
-    if _safe(name) != name:
-        return "节点名包含不支持的字符，无法作为文件名"
     return None
 
 
@@ -173,7 +158,7 @@ class NodeManager:
             cls._save(data)
 
             if old_name != name:
-                _rename_node_excel(old_name, name)
+                rename_node(old_name, name)
 
         return {"ok": True, "node": target}
 
@@ -195,7 +180,7 @@ class NodeManager:
             cls._save(rest)
 
             if purge:
-                _purge_node_excel(target["name"])
+                delete_node_data(target["name"])
 
         return {"ok": True, "node": target}
 
@@ -268,32 +253,6 @@ class NodeManager:
 
             if purge:
                 for t in targets:
-                    _purge_node_excel(t["name"])
+                    delete_node_data(t["name"])
 
         return {"ok": True, "deleted": targets, "count": len(targets)}
-
-
-# ---------- 文件操作辅助 ----------
-
-
-def _rename_node_excel(old_name: str, new_name: str) -> None:
-    for old_file, new_file in zip(
-        _node_excel_files(old_name), _node_excel_files(new_name)
-    ):
-        if os.path.exists(old_file) and not os.path.exists(new_file):
-            try:
-                os.makedirs(os.path.dirname(new_file), exist_ok=True)
-                os.rename(old_file, new_file)
-                print(f"[NodeManager] 节点 Excel 已重命名：{old_file} → {new_file}")
-            except OSError as e:
-                print(f"[NodeManager] 重命名失败：{e}")
-
-
-def _purge_node_excel(name: str) -> None:
-    for f in _node_excel_files(name):
-        if os.path.exists(f):
-            try:
-                os.remove(f)
-                print(f"[NodeManager] 已删除节点 Excel：{f}")
-            except OSError as e:
-                print(f"[NodeManager] 删除失败：{e}")

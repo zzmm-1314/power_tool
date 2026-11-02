@@ -63,6 +63,7 @@ const menus: MenuItem[] = [
             { title: '合约分解', path: '/contract/decomposition' },
             { title: '电厂合约仓位', path: '/contract/position' },
             { title: '滚撮收益模拟', path: '/contract/rolling-profit' },
+            { title: '长三角省间交易收益模拟', path: '/contract/cross-province-profit' }, // 新增
         ],
     },
     {
@@ -70,10 +71,11 @@ const menus: MenuItem[] = [
         children: [
             { title: '实际结算单更新', path: '/settlement/actual' },
             { title: '椒江模拟结算单更新', path: '/settlement/jiaojiang' },
-            { title: '现代模拟结算单更新', path: '/settlement/xiandai' },
+            { title: '通用模拟结算单更新', path: '/settlement/general' },
         ],
     },
     { title: '申报系数预测', path: '/coefficient' },
+    { title: '滚撮分析', path: '/rolling' },
     {
         title: '月报与数据提取',
         children: [
@@ -89,7 +91,7 @@ const menus: MenuItem[] = [
             { title: '中长期合约配置', path: '/settings/contract-config' }, // 新增
         ],
     },
-    { title: '滚撮分析', path: '/rolling' },
+
 ]
 
 /** 默认展开所有折叠框 */

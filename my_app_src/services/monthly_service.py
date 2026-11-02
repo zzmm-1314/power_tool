@@ -9,7 +9,7 @@ from typing import Dict, List
 
 from docxtpl import DocxTemplate
 
-from services.temp_manager import TempManager
+from config import Config
 from utils.pdf_parser import (
     FIELDS_META,
     build_sheets,
@@ -20,7 +20,8 @@ from utils.pdf_parser import (
 
 
 def _monthly_root() -> str:
-    d = os.path.join(TempManager.base_dir(), "monthly")
+    """月报模板目录（正式业务数据，存放于 data/monthly）"""
+    d = os.path.join(Config.DATA_DIR, "monthly")
     os.makedirs(d, exist_ok=True)
     return d
 

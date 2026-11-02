@@ -9,14 +9,14 @@ import type { DataSource } from '@/types'
 const props = defineProps<{ source?: DataSource }>()
 
 const text = computed(() => {
+    if (props.source === 'preview') return '● 数据来源：内存预览'
     if (props.source === 'database') return '● 数据来源：数据库'
-    if (props.source === 'excel') return '● 数据来源：Excel 临时'
     return '○ 暂无数据'
 })
 
 const cls = computed(() => ({
     db: props.source === 'database',
-    excel: props.source === 'excel',
+    preview: props.source === 'preview',
     empty: !props.source || props.source === 'empty',
 }))
 </script>
@@ -34,7 +34,7 @@ const cls = computed(() => ({
     color: #2d6cdf;
 }
 
-.source-tag.excel {
+.source-tag.preview {
     background: #fdf6ec;
     color: #e6a23c;
 }

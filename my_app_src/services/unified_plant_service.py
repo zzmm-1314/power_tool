@@ -6,14 +6,14 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from services.temp_manager import TempManager
+from config import Config
 
 _lock = threading.Lock()
 
 
-# 导入目录
+# 导入目录（统调电厂属于正式业务数据，存放于 data/unified-plants）
 def _import_dir() -> str:
-    d = os.path.join(TempManager.base_dir(), "unified-plants")
+    d = os.path.join(Config.DATA_DIR, "unified-plants")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -126,7 +126,7 @@ def save_import(file_storage) -> Dict:
 
     return {
         "ok": True,
-        "path": os.path.relpath(path, TempManager.base_dir()).replace("\\", "/"),
+        "path": os.path.relpath(path, Config.DATA_DIR).replace("\\", "/"),
         "count": len(items),
         "cities": len({it["city"] for it in items if it["city"]}),
         "plants": len({it["plant"] for it in items}),

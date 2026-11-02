@@ -1,0 +1,1 @@
+function l(a,r){if(!a||!r)return[];const e=new Date(a),n=new Date(r);if(isNaN(e.getTime())||isNaN(n.getTime()))return[];const c=e<=n?e:n,g=e<=n?n:e,s=[],t=new Date(c);let o=0;for(;t<=g&&o<400;){const i=t.getFullYear(),u=String(t.getMonth()+1).padStart(2,"0"),D=String(t.getDate()).padStart(2,"0");s.push(`${i}-${u}-${D}`),t.setDate(t.getDate()+1),o++}return s}export{l as e};

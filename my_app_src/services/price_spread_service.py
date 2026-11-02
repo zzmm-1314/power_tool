@@ -1,47 +1,33 @@
-"""价差分析服务：日前 − 实时（统一结算点 + 电厂节点）—— 48 点精度"""
+"""价差分析服务：日前 − 实时（统一结算点 + 电厂节点）—— 48 点精度
 
-import os
+数据来源为业务数据库（原 data/temp 临时 Excel 存储已删除）。
+"""
+
 from typing import Dict, List, Optional
 
-from services.database_provider import fetch_from_database
 from services.day_ahead_parser import (
     TARGET_DEVICE_REAL_TIME,
     _norm_time,
     _time_to_slot_index,
-    parse_real_time_price_excel,
 )
 from services.day_ahead_service import (
     SLOT_TIMES,
     DataSource,
-    _empty_heatmap,
-    _scan_unified_temp_files,
-    read_node_excel,
+    _merge_source,
+    load_items,
+    load_node_items,
+    load_unified_items,
 )
-from services.temp_manager import TempManager
+
 
 # ============================================================
 #                    实时价格数据（spread/unified）
 # ============================================================
 
 
-def _spread_unified_dir() -> str:
-    d = os.path.join(TempManager.base_dir(), "spread", "unified")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _scan_spread_unified_files() -> List[Dict]:
-    items: List[Dict] = []
-    d = _spread_unified_dir()
-    for fn in sorted(os.listdir(d)):
-        if not fn.lower().endswith((".xlsx", ".xls")):
-            continue
-        fp = os.path.join(d, fn)
-        try:
-            items.extend(parse_real_time_price_excel(fp))
-        except Exception as e:
-            print(f"[SpreadService] 解析实时 {fn} 失败: {e}")
-    return items
+def load_spread_unified_items() -> List[Dict]:
+    """实时 · 统一结算点全部日期数据"""
+    return load_items("spread", "unified", TARGET_DEVICE_REAL_TIME)
 
 
 # ============================================================
@@ -87,7 +73,7 @@ def _build_spread_heatmap(
     rt_items: List[Dict],
     end_date: Optional[str] = None,
     days: int = 14,
-    start_date: Optional[str] = None,  # ← 必须存在
+    start_date: Optional[str] = None,
 ) -> Dict:
     day_map = {it["date"]: it for it in day_items}
     rt_map = {it["date"]: it for it in rt_items}
@@ -129,9 +115,32 @@ def _build_spread_heatmap(
         "dates": common_dates,
         "hours": SLOT_TIMES,
         "matrix": matrix,
-        "source": DataSource.EXCEL,
+        "source": _merge_source(day_items + rt_items),
         "minValue": round(min_v, 3),
         "maxValue": round(max_v, 3),
+    }
+
+
+def _spread_single(day_items: List[Dict], rt_items: List[Dict], date: str) -> Dict:
+    if not day_items or not rt_items:
+        return {"date": date, "source": DataSource.EMPTY, "hourly": []}
+
+    day_slots = _raw_to_slots(day_items[-1]["raw"])
+    rt_slots = _raw_to_slots(rt_items[-1]["raw"])
+
+    hourly = []
+    for i, label in enumerate(SLOT_TIMES):
+        a = day_slots[i]
+        b = rt_slots[i]
+        v = None
+        if a is not None and b is not None:
+            v = round(a - b, 3)
+        hourly.append({"hour": label, "value": v})
+
+    return {
+        "date": date,
+        "source": _merge_source(day_items + rt_items),
+        "hourly": hourly,
     }
 
 
@@ -143,34 +152,21 @@ def _build_spread_heatmap(
 def fetch_spread_heatmap(
     end_date: Optional[str] = None,
     days: int = 14,
-    start_date: Optional[str] = None,  # ← 必须存在
+    start_date: Optional[str] = None,
 ) -> Dict:
-    day_items = _scan_unified_temp_files()
-    rt_items = _scan_spread_unified_files()
     return _build_spread_heatmap(
-        day_items, rt_items, end_date, days, start_date=start_date
+        load_unified_items(),
+        load_spread_unified_items(),
+        end_date,
+        days,
+        start_date=start_date,
     )
 
 
 def fetch_spread_single_day(date: str) -> Dict:
-    day_items = [it for it in _scan_unified_temp_files() if it["date"] == date]
-    rt_items = [it for it in _scan_spread_unified_files() if it["date"] == date]
-    if not day_items or not rt_items:
-        return {"date": date, "source": DataSource.EMPTY, "hourly": []}
-
-    day_slots = _raw_to_slots(day_items[-1]["raw"])
-    rt_slots = _raw_to_slots(rt_items[-1]["raw"])
-
-    hourly = []
-    for i, label in enumerate(SLOT_TIMES):
-        a = day_slots[i]
-        b = rt_slots[i]
-        v = None
-        if a is not None and b is not None:
-            v = round(a - b, 3)
-        hourly.append({"hour": label, "value": v})
-
-    return {"date": date, "source": DataSource.EXCEL, "hourly": hourly}
+    day_items = [it for it in load_unified_items() if it["date"] == date]
+    rt_items = [it for it in load_spread_unified_items() if it["date"] == date]
+    return _spread_single(day_items, rt_items, date)
 
 
 # ============================================================
@@ -179,20 +175,19 @@ def fetch_spread_single_day(date: str) -> Dict:
 
 
 def _read_spread_plant_node(node_name: str) -> List[Dict]:
-    """temp/spread/plant/{node}.xlsx"""
-    return read_node_excel(node_name, base_subdir="spread/plant")
+    return load_node_items(node_name, base_subdir="spread/plant")
 
 
 def fetch_spread_plant_heatmap(
     node_name: str,
     end_date: Optional[str] = None,
     days: int = 14,
-    start_date: Optional[str] = None,  # ← 必须存在
+    start_date: Optional[str] = None,
 ) -> Dict:
     if not node_name:
         return _empty_spread_heatmap()
 
-    day_items = read_node_excel(node_name, base_subdir="day-ahead/plant")
+    day_items = load_node_items(node_name, base_subdir="day-ahead/plant")
     rt_items = _read_spread_plant_node(node_name)
     return _build_spread_heatmap(
         day_items, rt_items, end_date, days, start_date=start_date
@@ -202,26 +197,11 @@ def fetch_spread_plant_heatmap(
 def fetch_spread_plant_single_day(node_name: str, date: str) -> Dict:
     day_items = [
         it
-        for it in read_node_excel(node_name, base_subdir="day-ahead/plant")
+        for it in load_node_items(node_name, base_subdir="day-ahead/plant")
         if it["date"] == date
     ]
     rt_items = [it for it in _read_spread_plant_node(node_name) if it["date"] == date]
-    if not day_items or not rt_items:
-        return {"date": date, "source": DataSource.EMPTY, "hourly": []}
-
-    day_slots = _raw_to_slots(day_items[-1]["raw"])
-    rt_slots = _raw_to_slots(rt_items[-1]["raw"])
-
-    hourly = []
-    for i, label in enumerate(SLOT_TIMES):
-        a = day_slots[i]
-        b = rt_slots[i]
-        v = None
-        if a is not None and b is not None:
-            v = round(a - b, 3)
-        hourly.append({"hour": label, "value": v})
-
-    return {"date": date, "source": DataSource.EXCEL, "hourly": hourly}
+    return _spread_single(day_items, rt_items, date)
 
 
 # ============================================================
@@ -247,21 +227,21 @@ def fetch_spread_daily_prices(
 ) -> Dict:
     """
     返回单日的日前价格、实时价格、价差（各 48 点）。
-    - node_type="unified"：temp/day-ahead/unified + temp/spread/unified
-    - node_type="plant"  ：temp/day-ahead/plant/{node} + temp/spread/plant/{node}
+    - node_type="unified"：日前统一结算点 + 实时统一结算点
+    - node_type="plant"  ：日前节点 + 实时节点
     """
     if not date:
         return _empty_daily_prices(date)
 
     if node_type == "unified":
-        day_items = [it for it in _scan_unified_temp_files() if it["date"] == date]
-        rt_items = [it for it in _scan_spread_unified_files() if it["date"] == date]
+        day_items = [it for it in load_unified_items() if it["date"] == date]
+        rt_items = [it for it in load_spread_unified_items() if it["date"] == date]
     else:
         if not node_name:
             return _empty_daily_prices(date)
         day_items = [
             it
-            for it in read_node_excel(node_name, base_subdir="day-ahead/plant")
+            for it in load_node_items(node_name, base_subdir="day-ahead/plant")
             if it["date"] == date
         ]
         rt_items = [
@@ -289,5 +269,5 @@ def fetch_spread_daily_prices(
         "dayAhead": day_slots,
         "realTime": rt_slots,
         "spread": spread_slots,
-        "source": DataSource.EXCEL,
+        "source": _merge_source(day_items + rt_items),
     }

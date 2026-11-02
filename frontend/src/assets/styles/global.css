@@ -41,3 +41,36 @@ body {
 .scroll-y::-webkit-scrollbar-track {
     background: transparent;
 }
+
+/* ================= 全局美化原生文件上传按钮 ================= */
+input[type="file"] {
+    font-size: 13px;
+    color: #606266;
+    /* 防止右侧文字溢出 */
+    max-width: 100%;
+}
+
+input[type="file"]::file-selector-button {
+    height: 32px;
+    padding: 0 16px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    background: #f5f7fa;
+    color: #606266;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    margin-right: 10px;
+    transition: all 0.2s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+    background: #ecf5ff;
+    color: #2d6cdf;
+    border-color: #2d6cdf;
+}
+
+/* 针对某些特定的隐藏 input 内层微调（如隐藏了原生 input 的封装） */
+.hidden-input {
+    display: none !important;
+}

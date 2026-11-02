@@ -5,8 +5,10 @@ from datetime import datetime
 import openpyxl
 import pandas as pd
 
-# 基础路径
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "temp", "contract")
+# 基础路径（合同配置属于正式业务数据，存放于 data/contract）
+DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "contract"
+)
 BASE_DIR = os.path.join(DATA_DIR, "base")
 NODES_DIR = os.path.join(DATA_DIR, "nodes")
 
@@ -151,6 +153,15 @@ def generate_contract_decomposition(
     holiday_set = _load_holidays_from_file(holiday_path)
 
     month_data = typical_curves.get(month)
+
+    # 如果当前月没有数据，且是 12 月，则自动降级参考 11 月的系数
+    if not month_data and month == 12:
+        month_data = typical_curves.get(11)
+        if month_data:
+            print(
+                "[ContractService] 提示：典型曲线中未找到 12 月的数据，已自动参考 11 月的分解系数。"
+            )
+
     if not month_data:
         raise ValueError(f"典型曲线中未找到 {month} 月的数据")
 
