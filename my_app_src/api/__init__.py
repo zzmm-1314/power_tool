@@ -20,9 +20,7 @@ def register_blueprints(app):
     app.register_blueprint(monthly_bp, url_prefix="/api/monthly")
     app.register_blueprint(upload_bp, url_prefix="/api/upload")
     # 兼容旧前端构建产物里硬编码的 /api/temp-data/upload，避免 405
-    app.register_blueprint(
-        upload_bp, name="upload_legacy", url_prefix="/api/temp-data"
-    )
+    app.register_blueprint(upload_bp, name="upload_legacy", url_prefix="/api/temp-data")
     app.register_blueprint(nodes_bp, url_prefix="/api/nodes")
     app.register_blueprint(unified_plants_bp, url_prefix="/api/unified-plants")
     app.register_blueprint(coefficient_bp, url_prefix="/api/coefficient")

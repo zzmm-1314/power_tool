@@ -6,15 +6,11 @@
 
 from typing import Dict
 from datetime import datetime, timedelta
-
+from services.bid_space_service import fetch_load, fetch_pv
+from services.db_store import fetch_load_pv, clear_load_pv
 from services.database_provider import fetch_series
 from services.load_parser import TARGET_DEVICE
-
-
-class DataSource:
-    DB = "database"
-    PREVIEW = "preview"
-    EMPTY = "empty"
+from services.constants import DataSource
 
 
 def _iterate_date_range(start_date: str, end_date: str, max_days: int = 60):
@@ -52,30 +48,67 @@ def _merge_source(sources: set) -> str:
 
 
 def fetch_load_data(date: str) -> Dict:
-    """获取指定日期的负荷数据（固定浙江电网）"""
-    # 同 kind 以最后写入的一条为准（预览覆盖数据库）
-    grouped: Dict[str, Dict] = {}
-    for rec in fetch_series("load", "", date, TARGET_DEVICE):
-        grouped[rec["kind"]] = rec
+    """获取指定日期的负荷数据：优先江苏库，降级浙江库"""
+    # 1. 尝试外部库（江苏）
+    external_points = fetch_load(date)
+    if external_points:
+        forecast_pts = [
+            {"time": p["time"], "value": p["value"]}
+            for p in external_points
+            if p.get("value") is not None
+        ]
+        actual_pts = [
+            {"time": p["time"], "value": p["actual"]}
+            for p in external_points
+            if p.get("actual") is not None
+        ]
 
-    if grouped:
-        return {
-            "date": date,
-            "source": _merge_source({r.get("source") for r in grouped.values()}),
-            "series": [
-                {
-                    "device": rec.get("device") or TARGET_DEVICE,
-                    "kind": rec["kind"],
-                    "points": rec["points"],
-                }
-                for rec in grouped.values()
-            ],
-        }
+        series = []
+        if forecast_pts:
+            series.append(
+                {"device": TARGET_DEVICE, "kind": "forecast", "points": forecast_pts}
+            )
+            clear_load_pv(date, "load", "forecast", TARGET_DEVICE)  # 清理浙江库
+        if actual_pts:
+            series.append(
+                {"device": TARGET_DEVICE, "kind": "actual", "points": actual_pts}
+            )
+            clear_load_pv(date, "load", "actual", TARGET_DEVICE)  # 清理浙江库
+
+        if series:
+            return {"date": date, "source": DataSource.DB, "series": series}
+
+    # 2. 降级：从浙江本地库查
+    forecast_rows = fetch_load_pv(date, "load", "forecast", TARGET_DEVICE)
+    actual_rows = fetch_load_pv(date, "load", "actual", TARGET_DEVICE)
+
+    series = []
+    if forecast_rows:
+        series.append(
+            {
+                "device": TARGET_DEVICE,
+                "kind": "forecast",
+                "points": [
+                    {"time": r["time_label"], "value": r["value"]}
+                    for r in forecast_rows
+                ],
+            }
+        )
+    if actual_rows:
+        series.append(
+            {
+                "device": TARGET_DEVICE,
+                "kind": "actual",
+                "points": [
+                    {"time": r["time_label"], "value": r["value"]} for r in actual_rows
+                ],
+            }
+        )
 
     return {
         "date": date,
-        "source": DataSource.EMPTY,
-        "series": [],
+        "source": DataSource.DB if series else DataSource.EMPTY,
+        "series": series,
     }
 
 
@@ -124,30 +157,68 @@ def fetch_load_range(start_date: str, end_date: str) -> Dict:
 
 
 def fetch_pv_data(date: str) -> Dict:
-    grouped: Dict[str, Dict] = {}
-    for rec in fetch_series("pv", "", date, TARGET_DEVICE):
-        grouped[rec["kind"]] = rec
+    """优先从外部业务库读取光伏"""
+    # 1. 尝试外部库（江苏）
+    external_points = fetch_pv(date)
+    if external_points:
+        forecast_pts = [
+            {"time": p["time"], "value": p["value"]}
+            for p in external_points
+            if p.get("value") is not None
+        ]
+        actual_pts = [
+            {"time": p["time"], "value": p["actual"]}
+            for p in external_points
+            if p.get("actual") is not None
+        ]
 
-    if not grouped:
-        return {
-            "date": date,
-            "source": DataSource.EMPTY,
-            "series": [],
-        }
+        series = []
+        if forecast_pts:
+            series.append(
+                {"device": TARGET_DEVICE, "kind": "pv_forecast", "points": forecast_pts}
+            )
+            clear_load_pv(date, "pv", "forecast", TARGET_DEVICE)
+        if actual_pts:
+            series.append({"device": TARGET_DEVICE, "kind": "pv", "points": actual_pts})
+            clear_load_pv(date, "pv", "actual", TARGET_DEVICE)
 
-    ordered = sorted(grouped.values(), key=lambda r: 0 if r["kind"] == "pv" else 1)
+        if series:
+            return {"date": date, "source": DataSource.DB, "series": series}
+
+    # 2. 降级：从浙江本地库查
+    forecast_rows = fetch_load_pv(date, "pv", "forecast", TARGET_DEVICE)
+    actual_rows = fetch_load_pv(date, "pv", "actual", TARGET_DEVICE)
+
+    series = []
+    if forecast_rows:
+        series.append(
+            {
+                "device": TARGET_DEVICE,
+                "kind": "pv_forecast",
+                "points": [
+                    {"time": r["time_label"], "value": r["value"]}
+                    for r in forecast_rows
+                ],
+            }
+        )
+    if actual_rows:
+        series.append(
+            {
+                "device": TARGET_DEVICE,
+                "kind": "pv",
+                "points": [
+                    {"time": r["time_label"], "value": r["value"]} for r in actual_rows
+                ],
+            }
+        )
+
+    # 保持原有排序：实际在前，预测在后
+    series.sort(key=lambda s: 0 if s["kind"] == "pv" else 1)
+
     return {
         "date": date,
-        # ⚠ 修复：原来是 DataSource.DB 写死，导致预览数据被错标为 DB
-        "source": _merge_source({r.get("source") for r in grouped.values()}),
-        "series": [
-            {
-                "device": rec.get("device") or TARGET_DEVICE,
-                "kind": rec["kind"],
-                "points": rec["points"],
-            }
-            for rec in ordered
-        ],
+        "source": DataSource.DB if series else DataSource.EMPTY,
+        "series": series,
     }
 
 

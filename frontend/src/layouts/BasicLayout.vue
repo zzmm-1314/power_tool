@@ -1,17 +1,18 @@
 <template>
-    <div class="basic-layout">
-        <AppHeader class="layout-header" />
-
-        <div class="layout-body">
-            <AppSidebar class="layout-sidebar" :collapsed="appStore.sidebarCollapsed" />
-
-            <main class="layout-content scroll-y">
+    <div class="app-wrapper">
+        <AppHeader :collapsed="isCollapsed" @toggle="appStore.toggleSidebar()" />
+        <div class="main-container">
+            <AppSidebar :collapsed="isCollapsed" />
+            <div class="content-wrapper">
+                <!-- 新增过渡动画 -->
                 <router-view v-slot="{ Component }">
-                    <keep-alive>
-                        <component :is="Component" />
-                    </keep-alive>
+                    <transition name="fade-transform" mode="out-in">
+                        <keep-alive :max="5">
+                            <component :is="Component" :key="$route.fullPath" />
+                        </keep-alive>
+                    </transition>
                 </router-view>
-            </main>
+            </div>
         </div>
     </div>
 </template>
@@ -20,10 +21,12 @@
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import { useAppStore } from '@/stores/app'
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, computed } from 'vue'
 let heartbeatTimer: number | undefined
 
 const appStore = useAppStore()
+const isCollapsed = computed(() => appStore.sidebarCollapsed)
+
 // 发送心跳（仅在正式环境生效）
 function sendHeartbeat() {
     if (import.meta.env.DEV) return // 开发模式下不发送，避免开发时后端自动退出
@@ -46,32 +49,41 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.basic-layout {
+.app-wrapper {
+    height: 100vh;
     display: flex;
     flex-direction: column;
-    height: 100%;
     overflow: hidden;
 }
 
-.layout-header {
-    flex: 0 0 56px;
-}
-
-.layout-body {
+.main-container {
     flex: 1;
     display: flex;
-    min-height: 0;
     overflow: hidden;
+    min-height: 0;
 }
 
-.layout-sidebar {
-    flex: 0 0 auto;
-}
-
-.layout-content {
+.content-wrapper {
     flex: 1;
     min-width: 0;
-    padding: 16px;
-    background: #f5f7fa;
+    overflow-y: auto;
+    padding: 16px 20px;
+    /* 给所有页面统一边距 */
+}
+
+/* 路由切换过渡：类名由 transition name 动态生成，非死样式 */
+.fade-transform-enter-active,
+.fade-transform-leave-active {
+    transition: all 0.3s ease;
+}
+
+.fade-transform-enter-from {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+.fade-transform-leave-to {
+    opacity: 0;
+    transform: translateY(-10px);
 }
 </style>

@@ -4,6 +4,11 @@ import re
 from datetime import datetime
 import openpyxl
 import pandas as pd
+import json
+from services.db_store import fetch_contract_config
+from utils.logger import get_logger
+
+logger = get_logger("services.contract_service")
 
 # 基础路径（合同配置属于正式业务数据，存放于 data/contract）
 DATA_DIR = os.path.join(
@@ -88,14 +93,13 @@ def _load_typical_curve_from_file(file_path: str) -> dict:
                             "法定节假日": safe_get_val(weight_row, 4, 0.0),
                         }
 
-            if is_hour_weight and any(
-                ":" in str(c) and str(c)[0].isdigit() for c in row if c
-            ):
+            if is_hour_weight:
                 try:
-                    w_work = float(row[1] or 0) if len(row) > 1 else 0
-                    w_sat = float(row[2] or 0) if len(row) > 2 else 0
-                    w_sun = float(row[3] or 0) if len(row) > 3 else 0
-                    w_hol = float(row[4] or 0) if len(row) > 4 else 0
+                    # 直接读取第 2 列到第 5 列的值，不依赖 A 列的时间格式
+                    w_work = float(row[1]) if len(row) > 1 and pd.notna(row[1]) else 0
+                    w_sat = float(row[2]) if len(row) > 2 and pd.notna(row[2]) else 0
+                    w_sun = float(row[3]) if len(row) > 3 and pd.notna(row[3]) else 0
+                    w_hol = float(row[4]) if len(row) > 4 and pd.notna(row[4]) else 0
 
                     curves[current_month]["分时权重"].setdefault("工作日", []).append(
                         w_work
@@ -109,11 +113,12 @@ def _load_typical_curve_from_file(file_path: str) -> dict:
                     curves[current_month]["分时权重"].setdefault(
                         "法定节假日", []
                     ).append(w_hol)
-                except Exception:
+                except (ValueError, TypeError):
+                    # 遇到表头等非数字行会自动跳过
                     pass
         wb.close()
     except Exception as e:
-        print(f"解析 Excel 失败: {e}")
+        logger.warning(f"解析 Excel 失败: {e}")
     return curves
 
 
@@ -128,7 +133,7 @@ def _load_holidays_from_file(file_path: str) -> set:
                 if pd.notna(val):
                     holiday_set.add(pd.to_datetime(val).strftime("%Y-%m-%d"))
     except Exception as e:
-        print(f"解析节假日失败: {e}")
+        logger.warning(f"解析节假日失败: {e}")
     return holiday_set
 
 
@@ -141,24 +146,35 @@ def generate_contract_decomposition(
     qty_tenday2: float,
     qty_tenday3: float,
 ) -> dict:
-    """纯根据本地基础配置进行分解计算"""
+    """完全根据数据库配置进行分解计算"""
     ensure_dirs()
-    curve_path = os.path.join(BASE_DIR, "typical_curve.xlsx")
-    holiday_path = os.path.join(BASE_DIR, "holidays.xlsx")
 
-    if not os.path.exists(curve_path):
-        raise ValueError("未找到典型曲线，请先在「设置-中长期合约配置」中上传")
+    # 1. 完全从数据库读取 JSON 配置
+    db_curve_json = fetch_contract_config("typical_curve")
+    if not db_curve_json:
+        raise ValueError("数据库中未找到典型曲线，请先在「中长期合约配置」中上传")
 
-    typical_curves = _load_typical_curve_from_file(curve_path)
-    holiday_set = _load_holidays_from_file(holiday_path)
+    try:
+        raw_curves = json.loads(db_curve_json)
+        # 因为 JSON 的 key 都是字符串，需要转回 int
+        typical_curves = {int(k): v for k, v in raw_curves.items()}
+    except Exception as e:
+        raise ValueError(f"解析数据库中的典型曲线失败: {e}")
 
+    holiday_set = set()
+    db_holiday_json = fetch_contract_config("holidays")
+    if db_holiday_json:
+        try:
+            holiday_set = set(json.loads(db_holiday_json))
+        except Exception as e:
+            logger.warning(f"解析数据库中的节假日失败: {e}")
+
+    # 2. 获取对应月份数据
     month_data = typical_curves.get(month)
-
-    # 如果当前月没有数据，且是 12 月，则自动降级参考 11 月的系数
     if not month_data and month == 12:
         month_data = typical_curves.get(11)
         if month_data:
-            print(
+            logger.info(
                 "[ContractService] 提示：典型曲线中未找到 12 月的数据，已自动参考 11 月的分解系数。"
             )
 
@@ -167,20 +183,22 @@ def generate_contract_decomposition(
 
     num_days = calendar.monthrange(year, month)[1]
 
-    def pad_weights(w_list):
-        if not w_list:
-            return [1 / 48.0] * 48
-        if len(w_list) >= 48:
-            return w_list[:48]
-        return w_list + [0.0] * (48 - len(w_list))
-
+    # 3. 构建每日基础数据
     days_info = []
     for d in range(1, num_days + 1):
         d_type = _get_date_type(year, month, d, holiday_set)
         weight = month_data["日权重"].get(d_type, 1.0)
-        hour_weights = pad_weights(month_data["分时权重"].get(d_type))
-        if sum(hour_weights) == 0:
+
+        # 获取原始分时权重
+        hour_weights = month_data["分时权重"].get(d_type, [])
+
+        # 确保有 48 个点，如果不足（比如数据库里存了 47 个），剩余补 0（严格遵循系数）
+        if not hour_weights:
             hour_weights = [1 / 48.0] * 48
+        elif len(hour_weights) < 48:
+            hour_weights = hour_weights + [0.0] * (48 - len(hour_weights))
+        else:
+            hour_weights = hour_weights[:48]
 
         days_info.append(
             {
@@ -203,6 +221,7 @@ def generate_contract_decomposition(
         res = []
         for info in period_days:
             daily_qty = total_qty * (info["weight"] / total_w)
+            # 严格依据系数生成 48 个点
             points = [daily_qty * info["hour_weights"][i] for i in range(48)]
             res.append(
                 {
@@ -214,7 +233,13 @@ def generate_contract_decomposition(
             )
         return res
 
-    times = [f"{i//2:02d}:{(i%2)*30:02d}" for i in range(48)]
+    # ⭐ 4. 生成标准时间轴：00:30 ~ 24:00
+    times = []
+    for i in range(48):
+        h = (i + 1) // 2
+        m = 30 if (i % 2 == 0) else 0
+        times.append("24:00" if i == 47 else f"{h:02d}:{m:02d}")
+
     return {
         "times": times,
         "year": build_period_data(qty_year, days_info),

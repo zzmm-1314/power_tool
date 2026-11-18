@@ -75,6 +75,8 @@ def _cleanup_old_files(workspace: str, max_age_hours: int = 24) -> None:
     try:
         for fn in os.listdir(workspace):
             fp = os.path.join(workspace, fn)
+            if not os.path.isfile(fp):
+                continue
             try:
                 if now - os.path.getmtime(fp) > max_age_hours * 3600:
                     os.remove(fp)

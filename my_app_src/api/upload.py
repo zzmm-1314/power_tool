@@ -13,7 +13,6 @@ from typing import Dict
 
 from flask import Blueprint, request
 
-from services import preview_store
 from services.ingest import store_points
 from utils.response import success, fail
 
@@ -66,14 +65,13 @@ def _handle_single(upload_file, data_type, sub_type, date, node_name):
         return {"ok": False, "name": filename, "error": "仅支持 .xlsx / .xls 文件"}
 
     # ========================================================
-    # ① 负荷 / 光伏：解析后按 kind 入库（同维度覆盖）
+    # ① 负荷 / 光伏：解析后按 (data_type, kind) 分组写 tmp_load_pv
     # ========================================================
     if data_type in ("load", "pv"):
         from services.load_parser import detect_kind_from_filename, parse_load_excel
+        from services.db_store import save_load_pv
 
         raw_kind = detect_kind_from_filename(filename)
-        actual_data_type = "pv" if raw_kind in ("pv", "pv_forecast") else "load"
-
         path = _write_to_sandbox(upload_file)
         try:
             try:
@@ -83,118 +81,134 @@ def _handle_single(upload_file, data_type, sub_type, date, node_name):
             if not items:
                 return {"ok": False, "name": filename, "error": "未解析到有效数据"}
 
-            stored = []
+            # it["kind"] ∈ {actual, forecast, pv, pv_forecast}
+            # 映射到 (data_type, kind)
+            def _map(k: str):
+                if k == "actual":
+                    return "load", "actual"
+                if k == "forecast":
+                    return "load", "forecast"
+                if k == "pv":
+                    return "pv", "actual"
+                if k == "pv_forecast":
+                    return "pv", "forecast"
+                return "load", "actual"
+
+            groups: dict = {}
             for it in items:
-                stored.append(
-                    _ingest(
-                        actual_data_type,
-                        it.get("kind", raw_kind),
-                        it.get("device", ""),
-                        it.get("date", ""),
-                        it.get("points") or [],
-                        filename,
-                    )
-                )
+                dt, kd = _map(it.get("kind", raw_kind))
+                groups.setdefault((dt, kd), []).append(it)
+
+            saved = []
+            for (dt, kd), group_items in groups.items():
+                records = []
+                for it in group_items:
+                    for i, pt in enumerate(it.get("points") or []):
+                        records.append(
+                            {
+                                "date": it["date"],
+                                "unit_name": it.get("device", "") or "浙江电网",
+                                "time_label": pt["time"],
+                                "seq": i,
+                                "value": pt["value"],
+                            }
+                        )
+                try:
+                    cnt = save_load_pv(records, dt, kd)
+                    saved.append(cnt)
+                except Exception as e:
+                    return {"ok": False, "name": filename, "error": f"入库失败: {e}"}
         finally:
             _cleanup(path)
 
         return _summary_result(
-            stored,
+            [{"preview": sum(saved), "saved": True, "dbError": ""}],
             filename,
             {
-                "dataType": actual_data_type,
+                "dataType": data_type,
                 "dates": sorted({it["date"] for it in items}),
-                "devices": sorted({it["device"] for it in items if it["device"]}),
-                "count": sum(s["preview"] for s in stored),
+                "devices": sorted(
+                    {it.get("device") for it in items if it.get("device")}
+                ),
+                "count": sum(saved),
             },
         )
 
     # ========================================================
-    # ② 日前电价 · 统一结算点
+    # ② 价格（日前/实时 × 统一结算点/节点）→ tmp_price
     # ========================================================
-    if data_type == "day-ahead" and sub_type == "unified":
-        from services.day_ahead_parser import parse_unified_price_excel
+    if data_type in ("day-ahead", "spread") and sub_type in ("unified", "plant"):
+        from services.day_ahead_parser import (
+            parse_plant_price_excel,
+            parse_real_time_price_excel,
+            parse_unified_price_excel,
+        )
+        from services.db_store import save_price
 
         path = _write_to_sandbox(upload_file)
         try:
-            try:
-                items = parse_unified_price_excel(path)
-            except Exception as e:
-                return {"ok": False, "name": filename, "error": f"解析失败: {e}"}
-            if not items:
-                return {"ok": False, "name": filename, "error": "未解析到有效数据"}
-
-            stored = [
-                _ingest(
-                    "day-ahead",
-                    "unified",
-                    it.get("device", ""),
-                    it["date"],
-                    it.get("raw") or [],
-                    filename,
+            if sub_type == "unified":
+                items = (
+                    parse_unified_price_excel(path)
+                    if data_type == "day-ahead"
+                    else parse_real_time_price_excel(path)
                 )
-                for it in items
-            ]
+            else:
+                items = parse_plant_price_excel(path)
         finally:
             _cleanup(path)
 
-        return _summary_result(
-            stored,
-            filename,
-            {
-                "dates": sorted({it["date"] for it in items}),
-                "count": sum(s["preview"] for s in stored),
-            },
-        )
+        if not items:
+            return {"ok": False, "name": filename, "error": "未解析到有效数据"}
 
-    # ---------- 价差分析 · 电厂节点实时价格 ----------
-    if data_type == "spread" and sub_type == "plant":
-        return _handle_plant_upload(upload_file, filename, "spread")
+        point_type = sub_type  # unified / plant
+        price_type = "day_ahead" if data_type == "day-ahead" else "realtime"
 
-    # ========================================================
-    # ③ 日前电价 · 电厂节点：按节点分发
-    # ========================================================
-    if data_type == "day-ahead" and sub_type == "plant":
-        return _handle_plant_upload(upload_file, filename, "day-ahead")
+        # ⭐ 修复1：如果前端指定了节点，只保留指定节点（极大减少入库量）
+        target_nodes = [n.strip() for n in node_name.split(",")] if node_name else None
 
-    # ========================================================
-    # ④ 价差分析 · 实时价格（统一结算点）
-    # ========================================================
-    if data_type == "spread" and sub_type == "unified":
-        from services.day_ahead_parser import parse_real_time_price_excel
+        # ⭐ 修复2：全量收集 records，不再按节点循环调 save_price（避免几百次建连）
+        records = []
+        matched_devices = set()
+        for it in items:
+            device = it.get("device", "")
+            if target_nodes and device not in target_nodes:
+                continue
+            matched_devices.add(device)
+            for i, pt in enumerate(it.get("raw") or []):
+                records.append(
+                    {
+                        "date": it["date"],
+                        "unit_name": device,
+                        "time_label": pt["time"],
+                        "seq": i,
+                        "value": pt["value"],
+                    }
+                )
 
-        path = _write_to_sandbox(upload_file)
+        if not records:
+            return {
+                "ok": False,
+                "name": filename,
+                "error": "未匹配到指定节点（或文件中无此节点）",
+            }
+
+        # 一次性入库，内部按 (date, unit_name) 分组覆盖
         try:
-            try:
-                items = parse_real_time_price_excel(path)
-            except Exception as e:
-                return {"ok": False, "name": filename, "error": f"解析失败: {e}"}
-            if not items:
-                return {"ok": False, "name": filename, "error": "未解析到有效数据"}
-
-            stored = [
-                _ingest(
-                    "spread",
-                    "unified",
-                    it.get("device", ""),
-                    it["date"],
-                    it.get("raw") or [],
-                    filename,
-                )
-                for it in items
-            ]
-        finally:
-            _cleanup(path)
+            cnt = save_price(records, point_type, price_type)
+        except Exception as e:
+            return {"ok": False, "name": filename, "error": f"入库失败: {e}"}
 
         return _summary_result(
-            stored,
+            [{"preview": cnt, "saved": True, "dbError": ""}],
             filename,
             {
+                "dataType": f"{data_type}-{sub_type}",
                 "dates": sorted({it["date"] for it in items}),
-                "count": sum(s["preview"] for s in stored),
+                "nodes": sorted(matched_devices),
+                "count": cnt,
             },
         )
-
     # ========================================================
     # ⑤ 其他：按传入 date 取「时间列 + 首个数值列」入库
     # ========================================================
@@ -230,71 +244,6 @@ def _handle_single(upload_file, data_type, sub_type, date, node_name):
         _cleanup(path)
 
     return _summary_result([res], filename, {"count": res["preview"]})
-
-
-def _handle_plant_upload(upload_file, filename: str, data_type: str) -> dict:
-    """电厂节点上传：解析 → 只处理已录入节点 → 预览 + 入库"""
-    from services.day_ahead_parser import parse_plant_price_excel
-    from services.node_manager import NodeManager
-
-    registered = set(NodeManager.names())
-    if not registered:
-        return {
-            "ok": False,
-            "name": filename,
-            "error": "尚未录入任何节点，请先在「节点编辑」中添加节点",
-        }
-
-    path = _write_to_sandbox(upload_file)
-    try:
-        try:
-            items = parse_plant_price_excel(path)
-        except Exception as e:
-            return {"ok": False, "name": filename, "error": f"解析失败: {e}"}
-    finally:
-        _cleanup(path)
-
-    if not items:
-        return {"ok": False, "name": filename, "error": "文件未解析到有效节点数据"}
-
-    grouped: dict = {}
-    for it in items:
-        grouped.setdefault(it["device"], []).append(it)
-
-    matched = {k: v for k, v in grouped.items() if k in registered}
-    ignored = sorted(set(grouped.keys()) - registered)
-
-    if not matched:
-        preview = "、".join(ignored[:5]) + (" 等" if len(ignored) > 5 else "")
-        return {
-            "ok": False,
-            "name": filename,
-            "error": f"文件中的节点都未在节点编辑中录入。（文件包含：{preview}）",
-            "ignoredNodes": ignored,
-        }
-
-    stored: list = []
-    written_dates: set = set()
-    written_nodes: set = set()
-    for name, day_items in matched.items():
-        for it in day_items:
-            res = _ingest(
-                data_type, "plant", name, it["date"], it.get("raw") or [], filename
-            )
-            stored.append(res)
-            written_dates.add(it["date"])
-            written_nodes.add(name)
-
-    return _summary_result(
-        stored,
-        filename,
-        {
-            "nodes": sorted(written_nodes),
-            "dates": sorted(written_dates),
-            "ignoredNodes": ignored,
-            "count": sum(s["preview"] for s in stored),
-        },
-    )
 
 
 @upload_bp.route("", methods=["POST"])
@@ -337,7 +286,6 @@ def upload():
         "total": total,
         "ok": ok,
         "saved": persisted,
-        "preview": preview_store.summary(),
     }
     if total == 1:
         payload.update(results[0])

@@ -200,6 +200,10 @@ DB_PORT=3306
 DB_USER=root
 DB_PASS=change-me
 DB_NAME=power_tool
+
+# 日志
+POWER_TOOL_LOG_LEVEL=INFO
+POWER_TOOL_LOG_FILE=
 ```
 
 说明：
@@ -211,6 +215,10 @@ DB_NAME=power_tool
 | `DB_HOST` / `DB_PORT` | 业务数据库地址与端口                       |
 | `DB_USER` / `DB_PASS` | 数据库账号与密码                           |
 | `DB_NAME`             | 数据库名，首次启动自动建表 `tmp_curve_data` |
+| `POWER_TOOL_LOG_LEVEL` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
+| `POWER_TOOL_LOG_FILE`  | 日志文件路径，留空则写 `<项目根>/logs/app.log`；填 `off` 则只输出控制台 |
+
+日志统一由 `my_app_src/utils/logger.py` 管理（业务代码不再使用 `print`）：同时输出到控制台与文件，单文件 2MB、保留 3 份滚动；启动器日志仍独立写在 `logs/launcher.log`。
 
 前端如需修改 API 地址，可在 `frontend/.env.development` 中配置：
 
@@ -393,7 +401,7 @@ frontend/public/geo/zhejiang.json
 ### 上传成功但页面没有数据
 
 - 确认数据库可连通（`.env` 中 `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME`）
-- 查看后端控制台是否有 `[DbStore]` 开头的日志：初始化建表失败或查询失败都会打印在此
+- 查看 `logs/app.log`（或控制台）中 `services.db_store`、`services.ingest` 开头的日志：建表失败、查询失败、入库降级都会记录在此
 - 首次启动会自动创建表 `tmp_curve_data`；若账号没有建表权限，需要手工执行建表语句
 - 文件名需带 `YYYYMMDD` 日期，否则解析不到日期会报「未解析到有效数据」
 

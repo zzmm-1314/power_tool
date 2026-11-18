@@ -1,4 +1,3 @@
-import io
 import os
 import sys
 import threading
@@ -8,9 +7,12 @@ from pathlib import Path
 
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
-
+from services.db_maintenance import start_maintenance_scheduler
 from api import register_blueprints
 from config import Config
+from utils.logger import get_logger
+
+logger = get_logger("app")
 
 # ==================== 路径 & 环境 ====================
 if getattr(sys, "frozen", False):
@@ -45,7 +47,7 @@ def _detect_mode() -> tuple[bool, str]:
                 return True, f"环境变量 {var}={val}"
             if v in ("development", "dev"):
                 return False, f"环境变量 {var}={val}"
-            print(f"[env] 忽略无法识别的 {var}={val!r}", flush=True)
+            logger.warning("忽略无法识别的 %s=%r", var, val)
 
     if (STATIC_DIR / "index.html").is_file():
         return True, "自动识别：检测到 static/index.html 构建产物 → 生产模式"
@@ -124,9 +126,8 @@ def start_watchdog(grace_period=15, timeout=30):
         while True:
             time.sleep(5)
             if time.time() - LAST_HEARTBEAT_TIME > timeout:
-                print(
-                    f"\n[Watchdog] 超过 {timeout} 秒未收到前端心跳，页面可能已关闭。自动退出进程...",
-                    flush=True,
+                logger.warning(
+                    "超过 %s 秒未收到前端心跳，页面可能已关闭，自动退出进程", timeout
                 )
                 # 必须用 os._exit 强制终止，因为 Flask 主线程还在阻塞中
                 os._exit(0)
@@ -144,41 +145,42 @@ def create_app() -> Flask:
         template_folder=str(STATIC_DIR) if IS_PROD else None,
     )
     app.config.from_object(Config)
+    app.json.ensure_ascii = False  # ← 替代已废弃的 JSON_AS_ASCII
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
     register_blueprints(app)
     register_heartbeat(app)
+    if IS_PROD:  # 只在生产模式启用，避免开发时调 Vite 刷新几秒无心跳就被杀
+        start_watchdog(grace_period=20, timeout=60)
     index_html = STATIC_DIR / "index.html"
     static_ready = index_html.is_file()
 
     # ===== 启动诊断 =====
-    print("=" * 60, flush=True)
-    print(f"[env] IS_PROD       = {IS_PROD}", flush=True)
-    print(f"[env] MODE_REASON   = {MODE_REASON}", flush=True)
-    print(f"[env] APP_ROOT      = {APP_ROOT}", flush=True)
-    print(f"[env] STATIC_DIR    = {STATIC_DIR}", flush=True)
-    print(f"[env] static_ready  = {static_ready}", flush=True)
-    print("=" * 60, flush=True)
+    logger.info(
+        "启动诊断:\n"
+        "  IS_PROD      = %s\n"
+        "  MODE_REASON  = %s\n"
+        "  APP_ROOT     = %s\n"
+        "  STATIC_DIR   = %s\n"
+        "  static_ready = %s",
+        IS_PROD,
+        MODE_REASON,
+        APP_ROOT,
+        STATIC_DIR,
+        static_ready,
+    )
 
     if not IS_PROD:
-        print(
-            "[dev] 开发模式：不检查 static，仅提供 /api/* 接口",
-            flush=True,
-        )
+        logger.info("开发模式：不检查 static，仅提供 /api/* 接口")
         if static_ready:
-            print(
-                f"[dev] 提示：检测到 {STATIC_DIR}，如仍想调试前端请用 Vite",
-                flush=True,
-            )
+            logger.info("提示：检测到 %s，如仍想调试前端请用 Vite", STATIC_DIR)
     else:
         if not static_ready:
-            print(
-                f"[prod] 警告：static 目录缺少 index.html，"
-                f"请把前端 dist 复制到 {STATIC_DIR}",
-                flush=True,
+            logger.warning(
+                "static 目录缺少 index.html，请把前端 dist 复制到 %s", STATIC_DIR
             )
         else:
-            print(f"[prod] 静态资源就绪：{STATIC_DIR}", flush=True)
+            logger.info("静态资源就绪：%s", STATIC_DIR)
 
     # ===== SPA / 开发提示兜底 =====
     # 注意：这里必须接受所有方法。若只声明 GET，未注册的 API 请求（如 POST）
@@ -207,6 +209,8 @@ def create_app() -> Flask:
 
         # 真实静态文件直接返回（生产模式或开发模式都允许）
         if path and static_ready:
+            if ".." in path.replace("\\", "/"):
+                return send_from_directory(STATIC_DIR, "index.html")  # 或直接 404
             target = STATIC_DIR / path
             if target.is_file():
                 return send_from_directory(STATIC_DIR, path)
@@ -229,8 +233,10 @@ def create_app() -> Flask:
         # 开发模式：返回开发提示页
         return DEV_HINT_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
-    # ===== 后台任务（已移除 WPS 云盘同步与文件清理） =====
-    # 由于后续将使用数据库，不再需要 watchdog 云盘同步和后台本地临时文件清理
+    # ===== 后台任务 =====
+    # 启动数据库数据自动清理任务
+    if IS_PROD:  # 开发模式下避免频繁打断，可选择只在生产/打包模式开启
+        start_maintenance_scheduler()
 
     return app
 
@@ -253,7 +259,7 @@ def _open_browser_later(url: str, delay: float = 1.2):
     try:
         webbrowser.open(url)
     except Exception as e:
-        print(f"[launcher] 自动打开浏览器失败：{e}", flush=True)
+        logger.warning("自动打开浏览器失败：%s", e)
 
 
 def main():
@@ -266,18 +272,21 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
 
-    print("=" * 60, flush=True)
-    print("  电力工具助手", flush=True)
-    print(f"  模式：{'生产' if IS_PROD else '开发'}", flush=True)
-    print(f"  后端端口：{port}", flush=True)
+    banner = [
+        "电力工具助手启动",
+        f"  模式：{'生产' if IS_PROD else '开发'}",
+        f"  后端端口：{port}",
+    ]
     if IS_PROD:
-        print(f"  访问地址：{url}", flush=True)
+        banner.append(f"  访问地址：{url}")
     else:
-        print(f"  API 地址：http://127.0.0.1:{port}/api/", flush=True)
-        print(f"  前端请另开终端启动：cd frontend && npm run dev", flush=True)
-        print(f"  前端地址：http://localhost:5173", flush=True)
-    print("  按 Ctrl+C 停止服务", flush=True)
-    print("=" * 60, flush=True)
+        banner += [
+            f"  API 地址：http://127.0.0.1:{port}/api/",
+            "  前端请另开终端启动：cd frontend && npm run dev",
+            "  前端地址：http://localhost:5173",
+        ]
+    banner.append("  按 Ctrl+C 停止服务")
+    logger.info("\n".join(banner))
 
     # 只在生产模式自动打开浏览器
     if IS_PROD:

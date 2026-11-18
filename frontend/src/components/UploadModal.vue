@@ -22,19 +22,26 @@
                             </select>
                         </div>
 
-                        <div v-if="currentDataset.needNode" class="form-item">
-                            <label>电厂节点名称</label>
-                            <div v-if="currentDataset.needNode" class="form-item">
-                                <label>选择节点</label>
-                                <select v-model="nodeName" class="select">
-                                    <option value="">请选择节点</option>
-                                    <option v-for="n in nodeOptions" :key="n.id" :value="n.name">
-                                        {{ n.name }}
-                                    </option>
-                                </select>
-                                <p v-if="!nodeOptions.length" class="hint">
-                                    暂无节点，请先在「节点编辑」页面添加
-                                </p>
+                        <div v-if="datasetKey.includes('plant')" class="form-item">
+                            <label>指定节点（可多选，留空则自动识别文件中所有节点）</label>
+
+                            <div v-if="defaultNodes.length" class="default-header">
+                                <span class="default-label">快捷选择：</span>
+                                <div class="action-btns">
+                                    <button type="button" class="text-btn" @click="selectAllDefaults">全选</button>
+                                    <span class="divider">|</span>
+                                    <button type="button" class="text-btn" @click="deselectAllDefaults">取消全选</button>
+                                </div>
+                            </div>
+
+                            <div v-if="defaultNodes.length" class="default-nodes-wrap">
+                                <span v-for="node in defaultNodes" :key="node" class="node-tag"
+                                    :class="{ active: selectedNodes.includes(node) }" @click="toggleNode(node)">
+                                    {{ node }}
+                                </span>
+                            </div>
+                            <div v-else class="hint" style="margin-top: 4px;">
+                                暂无默认节点，请点击右上角「⚙️ 节点配置」添加。
                             </div>
                         </div>
 
@@ -87,13 +94,6 @@
                                     <template v-else-if="r.ok && r.nodes?.length">
                                         写入 {{ r.nodes.length }} 个节点：
                                         <span class="node-list">{{ r.nodes.join('、') }}</span>
-                                        <template v-if="r.ignoredNodes?.length">
-                                            <br />
-                                            <span class="ignored-tip">
-                                                （已忽略 {{ r.ignoredNodes.length }} 个未录入节点，
-                                                如需处理请到「节点编辑」添加）
-                                            </span>
-                                        </template>
                                     </template>
 
                                     <template v-else-if="r.error">（{{ r.error }}）</template>
@@ -101,26 +101,12 @@
                                     <span v-if="r.ok && r.saved === true" class="saved-tip">
                                         · 已写入数据库
                                     </span>
-                                    <span v-else-if="r.ok && r.saved === false" class="preview-tip"
-                                        :title="r.dbError || '数据库不可用'">
-                                        · 仅内存预览（重启后需重新上传）
-                                    </span>
                                 </span>
                             </li>
                         </ul>
-                        <!-- ⭐ 新增：即时预览 -->
-                        <UploadPreview v-if="previewParams" :key="previewKey" :dataset-key="previewParams.datasetKey"
-                            :date="previewParams.date" :node-name="previewParams.nodeName" :saved="previewParams.saved"
-                            :save-tip="previewParams.saveTip" />
                     </div>
 
                     <div class="modal-footer">
-                        <button class="btn ghost" @click="close" :disabled="uploading">
-                            取消
-                        </button>
-                        <button v-if="canGoToPage" class="btn ghost" @click="goToPage">
-                            👁 前往查看
-                        </button>
                         <button class="btn" :disabled="!canSubmit || uploading" @click="submit">
                             {{ uploading ? '上传中...' : `上传 ${selectedFiles.length || ''} 个文件` }}
                         </button>
@@ -132,22 +118,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { uploadSingleFile, type UploadItemResult } from '@/api/modules/upload'
-import { listPlantNodes, type PlantNode } from '@/api/modules/nodes'
-import { useRouter } from 'vue-router'
-import UploadPreview from './UploadPreview.vue'
-const router = useRouter()
-/** 数据类型 → 对应业务页面路由（用于「前往查看」按钮） */
-const PAGE_MAP: Record<string, string> = {
-    load: '/load-analysis',
-    pv: '/load-analysis',
-    'day-ahead-unified': '/day-ahead-price/unified',
-    'day-ahead-plant': '/day-ahead-price/plant',
-    'spread-unified': '/price-spread/unified',
-    'spread-plant': '/price-spread/plant',
-}
+import { fetchPriceCompareDefaults } from '@/api/modules/nodes'
+
 interface DatasetOption {
     key: string
     label: string
@@ -156,6 +131,7 @@ interface DatasetOption {
     needNode?: boolean
 }
 
+const defaultNodes = ref<string[]>([])
 const DATASETS: DatasetOption[] = [
     { key: 'load', label: '负荷分析（浙江电网）', dataType: 'load' },
     { key: 'pv', label: '光伏出力（浙江电网）', dataType: 'pv' },
@@ -170,7 +146,6 @@ const DATASETS: DatasetOption[] = [
         label: '日前电价 · 电厂节点',
         dataType: 'day-ahead',
         subType: 'plant',
-        // needNode: true,          // ← 恢复 needNode
     },
     {
         key: 'spread-unified',
@@ -183,22 +158,22 @@ const DATASETS: DatasetOption[] = [
         label: '价差分析 · 电厂节点实时价格',
         dataType: 'spread',
         subType: 'plant',
-        // needNode 移除 —— 自动识别文件中所有节点，只写入已录入节点
     },
 ]
 
 const appStore = useAppStore()
-
 const visible = computed(() => appStore.uploadVisible)
 
 const datasetKey = ref<string>('load')
-const nodeName = ref('')
+const selectedNodes = ref<string[]>([])
+
 const selectedFiles = ref<File[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 const uploadResults = ref<UploadItemResult[]>([])
+
 interface UploadingItem {
     file: File
     name: string
@@ -210,6 +185,7 @@ interface UploadingItem {
     error?: string
 }
 const uploadingItems = ref<UploadingItem[]>([])
+
 /** 整体进度 = (已结束文件数 + 当前文件百分比) / 总文件数 */
 const overallPercent = computed(() => {
     const items = uploadingItems.value
@@ -225,87 +201,31 @@ const overallPercent = computed(() => {
     }
     return Math.round(((done + cur) / items.length) * 100)
 })
+
 const doneCount = computed(
     () =>
         uploadingItems.value.filter(
             (it) => it.status === 'ok' || it.status === 'error',
         ).length,
 )
+
 const currentDataset = computed<DatasetOption>(
     () => DATASETS.find((d) => d.key === datasetKey.value) ?? DATASETS[0],
 )
 
 const canSubmit = computed(() => {
     if (!selectedFiles.value.length) return false
-    if (currentDataset.value.needNode && !nodeName.value) return false
+    // ⭐ 修复1：原代码这里用了未定义的 nodeFilter，且 needNode 全被注释掉了，所以这里直接校验是否有文件即可
     return true
 })
-// 新增：从节点列表加载
-const nodeOptions = ref<PlantNode[]>([])
-/** 取第一个成功的上传结果用于预览 */
-const firstSuccess = computed<UploadItemResult | null>(
-    () => uploadResults.value.find((r) => r.ok) || null,
-)
-
-/**
- * 预览参数：从上传结果 & 当前数据集推导
- * - 缺失日期 / plant 类型缺失节点时返回 null → 不展示预览
- */
-const previewParams = computed<{
-    datasetKey: string
-    date: string
-    nodeName?: string
-    saved?: boolean
-    saveTip?: string
-} | null>(() => {
-    const r = firstSuccess.value
-    if (!r) return null
-
-    const ds = currentDataset.value
-    const date = r.dates?.[0]
-    if (!date) return null
-
-    let nodeName: string | undefined
-    if (ds.key.includes('plant')) {
-        nodeName = r.nodes?.[0]
-        if (!nodeName) return null
-    }
-
-    return {
-        datasetKey: ds.key,
-        date,
-        nodeName,
-        saved: r.saved,
-        saveTip: r.dbError,
-    }
-})
-
-/** 用于强制刷新预览（切换文件/重传时） */
-const previewKey = computed(() => {
-    const p = previewParams.value
-    if (!p) return ''
-    return `${p.datasetKey}|${p.date}|${p.nodeName || ''}|${p.saved}`
-})
-
-/** 有成功结果 + 有对应页面路由时，才展示「前往查看」 */
-const canGoToPage = computed(
-    () =>
-        !uploading.value &&
-        !!previewParams.value &&
-        !!PAGE_MAP[currentDataset.value.key],
-)
-
-function goToPage() {
-    const path = PAGE_MAP[currentDataset.value.key]
-    if (path) router.push(path)
-    close()
+function selectAllDefaults() {
+    // 直接将选中的节点覆盖为所有默认节点
+    selectedNodes.value = [...defaultNodes.value]
 }
-async function loadNodes() {
-    try {
-        nodeOptions.value = await listPlantNodes()
-    } catch {
-        nodeOptions.value = []
-    }
+
+function deselectAllDefaults() {
+    // 清空选中的节点
+    selectedNodes.value = []
 }
 function statusIcon(s: UploadingItem['status']): string {
     if (s === 'ok') return '✓'
@@ -313,23 +233,44 @@ function statusIcon(s: UploadingItem['status']): string {
     if (s === 'uploading') return '…'
     return '·'
 }
+
 function formatSize(bytes: number): string {
     if (!bytes) return ''
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
+
+async function loadDefaultNodes() {
+    try {
+        defaultNodes.value = await fetchPriceCompareDefaults()
+    } catch {
+        defaultNodes.value = []
+    }
+}
+
+// 修改关闭重置逻辑
 function close() {
-    if (uploading.value) return      // 上传中不能关
+    if (uploading.value) return
     appStore.closeUpload()
     setTimeout(() => {
         selectedFiles.value = []
-        uploadingItems.value = []      // ← 新增：清空上传队列
+        uploadingItems.value = []
         uploadResults.value = []
         msg.value = ''
-        nodeName.value = ''
+        selectedNodes.value = [] // 清空选中的节点
         if (fileInputRef.value) fileInputRef.value.value = ''
     }, 200)
+}
+
+// 点击切换节点选中状态
+function toggleNode(node: string) {
+    const idx = selectedNodes.value.indexOf(node)
+    if (idx > -1) {
+        selectedNodes.value.splice(idx, 1)
+    } else {
+        selectedNodes.value.push(node)
+    }
 }
 
 /* ===== 弹窗打开时应用「预选的数据类型」 ===== */
@@ -337,13 +278,14 @@ watch(
     () => appStore.uploadVisible,
     (v) => {
         if (!v) return
-        if (currentDataset.value.needNode) loadNodes()
+        loadDefaultNodes()
         const key = appStore.uploadInitialKey
         if (key && DATASETS.some((d) => d.key === key)) {
             datasetKey.value = key
         }
         msg.value = ''
         uploadResults.value = []
+        selectedNodes.value = []
     },
 )
 
@@ -361,7 +303,6 @@ async function submit() {
     msg.value = ''
     uploadResults.value = []
 
-    // 先入 ref，让 ref 内的元素全部变成 Proxy
     uploadingItems.value = selectedFiles.value.map((f) => ({
         file: f,
         name: f.name,
@@ -372,12 +313,12 @@ async function submit() {
     }))
 
     const ds = currentDataset.value
-    const nodeNameToSend = ds.needNode ? nodeName.value : undefined
+    // ⭐ 拼接选中的节点，如果有选中的就传逗号分隔的字符串
+    const nodeNameToSend = selectedNodes.value.length > 0 ? selectedNodes.value.join(',') : undefined
     let okCount = 0
 
-    // 关键：遍历 uploadingItems.value 里的元素（Proxy）
     for (let i = 0; i < uploadingItems.value.length; i++) {
-        const item = uploadingItems.value[i]   // ← Proxy，修改会触发响应
+        const item = uploadingItems.value[i]
         item.status = 'uploading'
         item.percent = 0
         item.loaded = 0
@@ -391,19 +332,17 @@ async function submit() {
                     nodeName: nodeNameToSend,
                 },
                 (loaded, total, percent) => {
-                    // 直接写 Proxy 的字段
                     item.loaded = loaded
                     item.total = total || item.file.size
                     item.percent = percent
                 },
             )
 
-            const r: UploadItemResult =
-                res?.results?.[0] ||
-                (res as unknown as UploadItemResult) || {
-                    ok: true,
-                    name: item.name,
-                }
+            const r: UploadItemResult = res.results?.[0] ?? {
+                ok: false,
+                name: item.name,
+                error: '后端未返回结果',
+            }
 
             item.result = r
             if (r.ok) {
@@ -448,11 +387,13 @@ async function submit() {
     }
 }
 
+// 修改切换数据集逻辑
 watch(datasetKey, () => {
     msg.value = ''
     uploadResults.value = []
     uploadingItems.value = []
-    if (currentDataset.value.needNode) loadNodes()
+    selectedNodes.value = []
+    // ⭐ 修复2：原代码调用了不存在的 loadNodes，且全局默认节点在弹窗打开时已加载，这里直接删除即可
 })
 </script>
 
@@ -476,7 +417,6 @@ watch(datasetKey, () => {
     display: flex;
     flex-direction: column;
     background: #fff;
-    border-radius: 10px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
     overflow: hidden;
 }
@@ -536,10 +476,8 @@ watch(datasetKey, () => {
 
 .select,
 .input {
-    height: 34px;
     padding: 0 10px;
     border: 1px solid #dcdfe6;
-    border-radius: 4px;
     font-size: 13px;
     outline: none;
 }
@@ -557,7 +495,6 @@ watch(datasetKey, () => {
     margin: 0 0 10px;
     padding: 6px 10px;
     background: #f5f7fa;
-    border-radius: 4px;
     font-size: 12px;
     color: #606266;
     word-break: break-all;
@@ -566,7 +503,6 @@ watch(datasetKey, () => {
 .msg {
     margin: 0 0 10px;
     padding: 6px 10px;
-    border-radius: 4px;
     font-size: 12px;
 }
 
@@ -585,7 +521,6 @@ watch(datasetKey, () => {
     margin: 0;
     padding: 8px 10px;
     background: #fafbfc;
-    border-radius: 4px;
     font-size: 12px;
     max-height: 160px;
     overflow-y: auto;
@@ -629,10 +564,8 @@ watch(datasetKey, () => {
 }
 
 .btn {
-    height: 34px;
     padding: 0 18px;
     border: none;
-    border-radius: 4px;
     background: #2d6cdf;
     color: #fff;
     font-size: 13px;
@@ -646,16 +579,6 @@ watch(datasetKey, () => {
 .btn:disabled {
     background: #a0b4d8;
     cursor: not-allowed;
-}
-
-.btn.ghost {
-    background: transparent;
-    color: #606266;
-    border: 1px solid #dcdfe6;
-}
-
-.btn.ghost:hover:not(:disabled) {
-    background: #f5f7fa;
 }
 
 .fade-enter-active,
@@ -673,21 +596,6 @@ watch(datasetKey, () => {
     word-break: break-all;
 }
 
-.node-list {
-    color: #2d6cdf;
-    word-break: break-all;
-}
-
-.ignored-tip {
-    color: #e6a23c;
-    font-size: 12px;
-}
-
-.preview-tip {
-    color: #e6a23c;
-    font-size: 12px;
-    margin-left: 6px;
-}
 
 /* ===== 上传进度 ===== */
 .progress-wrap {
@@ -705,14 +613,12 @@ watch(datasetKey, () => {
     flex: 1;
     height: 10px;
     background: #f0f2f5;
-    border-radius: 5px;
     overflow: hidden;
 }
 
 .overall-bar-fill {
     height: 100%;
     background: linear-gradient(90deg, #2d6cdf, #5b9bff);
-    border-radius: 5px;
     transition: width 0.2s;
 }
 
@@ -729,7 +635,6 @@ watch(datasetKey, () => {
     margin: 0;
     padding: 8px 10px;
     background: #fafbfc;
-    border-radius: 4px;
     font-size: 12px;
     max-height: 220px;
     overflow-y: auto;
@@ -777,14 +682,12 @@ watch(datasetKey, () => {
     flex: 0 0 120px;
     height: 6px;
     background: #eef0f3;
-    border-radius: 3px;
     overflow: hidden;
 }
 
 .queue-bar-fill {
     height: 100%;
     background: #2d6cdf;
-    border-radius: 3px;
     transition: width 0.2s;
 }
 
@@ -816,10 +719,101 @@ watch(datasetKey, () => {
     margin-left: 4px;
 }
 
-.preview-tip {
-    color: #e6a23c;
+.default-nodes-wrap {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.default-label {
     font-size: 12px;
-    margin-left: 4px;
-    cursor: help;
+    color: #909399;
+}
+
+.node-tag {
+    padding: 2px 8px;
+    background: #f0f2f5;
+    color: #606266;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.node-tag:hover {
+    background: #e4e7ed;
+}
+
+/* ===== 节点快捷选择 Tag ===== */
+.default-nodes-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.node-tag {
+    padding: 4px 12px;
+    background: #f4f4f5;
+    color: #606266;
+    border: 1px solid #e4e7ed;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.node-tag:hover {
+    border-color: #c0c4cc;
+    background: #ebeef5;
+}
+
+/* 选中后的高亮样式 */
+.node-tag.active {
+    background: #ecf5ff;
+    color: #2d6cdf;
+    border-color: #2d6cdf;
+    font-weight: 600;
+}
+
+/* ===== 节点快捷选择操作栏 ===== */
+.default-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+.default-label {
+    font-size: 12px;
+    color: #909399;
+}
+
+.action-btns {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.text-btn {
+    background: none;
+    border: none;
+    color: #2d6cdf;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.text-btn:hover {
+    text-decoration: underline;
+}
+
+.divider {
+    color: #dcdfe6;
+    font-size: 10px;
 }
 </style>

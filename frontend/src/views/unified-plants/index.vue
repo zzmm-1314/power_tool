@@ -2,11 +2,15 @@
     <PageContainer title="统调电厂">
         <template #extra>
             <!-- 新增：下载模板按钮 -->
-            <a href="/api/unified-plants/template" class="btn ghost"
+            <a :href="apiUrl('/unified-plants/template')" class="btn ghost"
                 style="text-decoration: none; display: inline-flex; align-items: center; margin-right: 8px;">
                 ⬇ 下载模板
             </a>
             <input ref="fileInputRef" type="file" accept=".xlsx,.xls" class="file-input" @change="onFileChange" />
+            <button class="btn" @click="openAddModal">+ 新增</button>
+            <button class="btn danger" :disabled="!selectedIds.length" @click="batchDelete">
+                删除选中 ({{ selectedIds.length }})
+            </button>
             <button class="btn" :disabled="!selectedFile || importing" @click="doImport">
                 {{ importing ? '导入中...' : '📥 导入数据' }}
             </button>
@@ -74,27 +78,41 @@
                         <table class="data-table">
                             <thead>
                                 <tr>
+                                    <th style="width: 44px" class="center">
+                                        <input type="checkbox" :checked="allSelected"
+                                            :indeterminate="someSelected && !allSelected" @change="toggleAll" />
+                                    </th>
                                     <th style="width: 60px">#</th>
                                     <th>调度命名</th>
                                     <th style="width: 100px">机组序号</th>
                                     <th style="width: 130px">铭牌出力(MW)</th>
                                     <th style="width: 120px">所在城市</th>
+                                    <th style="width: 140px" class="center">操作</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="(r, i) in rows" :key="i">
+                                <tr v-for="(r, i) in rows" :key="r.id"
+                                    :class="{ selected: selectedIds.includes(r.id) }">
+                                    <td class="center">
+                                        <input type="checkbox" :checked="selectedIds.includes(r.id)"
+                                            @change="toggleOne(r.id)" />
+                                    </td>
                                     <td class="center muted">
                                         {{ (pager.page - 1) * pager.pageSize + i + 1 }}
                                     </td>
                                     <td>{{ r.plant }}</td>
                                     <td class="center">{{ r.unit }}</td>
                                     <td class="center">
-                                        {{ r.capacity != null ? r.capacity.toFixed(2) : '—' }}
+                                        {{ r.capacity != null ? Number(r.capacity).toFixed(2) : '—' }}
                                     </td>
                                     <td class="center">{{ r.city }}</td>
+                                    <td class="center">
+                                        <button class="link-btn" @click="openEditModal(r)">编辑</button>
+                                        <button class="link-btn danger" @click="removeOne(r)">删除</button>
+                                    </td>
                                 </tr>
                                 <tr v-if="!rows.length">
-                                    <td colspan="5" class="empty-row">暂无数据</td>
+                                    <td colspan="7" class="empty-row">暂无数据</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -175,6 +193,39 @@
                 </template>
             </div>
         </div>
+        <Teleport to="body">
+            <div v-if="modalVisible" class="mask" @click.self="closeModal">
+                <div class="modal">
+                    <h3 class="modal-title">{{ editingId ? '编辑机组' : '新增机组' }}</h3>
+
+                    <div class="form-item">
+                        <label>调度命名 <span class="req">*</span></label>
+                        <input v-model.trim="form.plant" type="text" class="input" placeholder="如：北仑港电厂" />
+                    </div>
+                    <div class="form-item">
+                        <label>机组序号</label>
+                        <input v-model.trim="form.unit" type="text" class="input" placeholder="如：1" />
+                    </div>
+                    <div class="form-item">
+                        <label>铭牌出力(MW)</label>
+                        <input v-model.number="form.capacity" type="number" class="input" placeholder="如：630.0" />
+                    </div>
+                    <div class="form-item">
+                        <label>所在城市</label>
+                        <input v-model.trim="form.city" type="text" class="input" placeholder="如：宁波市" />
+                    </div>
+
+                    <p v-if="formError" class="msg err">{{ formError }}</p>
+
+                    <div class="modal-footer">
+                        <button class="btn ghost" @click="closeModal">取消</button>
+                        <button class="btn" :disabled="saving" @click="submit">
+                            {{ saving ? '保存中...' : '保存' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </PageContainer>
 </template>
 
@@ -190,11 +241,14 @@ import {
     fetchUnifiedPlantsPaged,
     fetchUnifiedPlantsMap,
     fetchUnifiedPlantsCities,
+    addUnifiedPlant,
+    updateUnifiedPlant,
+    deleteUnifiedPlantsBatch,
     type UnifiedPlantRow,
     type MapData,
 } from '@/api/modules/unifiedPlants'
 import { useAppStore } from '@/stores/app'
-
+import { apiUrl } from '@/utils/apiBase'
 const appStore = useAppStore()
 
 /* ============================================
@@ -492,7 +546,126 @@ function onSearch() {
     pager.page = 1
     loadTable()
 }
+/* ============================================
+ *  选择 & 批量操作
+ * ============================================ */
+const selectedIds = ref<number[]>([])
 
+const allSelected = computed(
+    () => rows.value.length > 0 && selectedIds.value.length === rows.value.length,
+)
+const someSelected = computed(
+    () => selectedIds.value.length > 0 && !allSelected.value,
+)
+
+function toggleAll(e: Event) {
+    const checked = (e.target as HTMLInputElement).checked
+    selectedIds.value = checked ? rows.value.map((r) => r.id) : []
+}
+
+function toggleOne(id: number) {
+    const i = selectedIds.value.indexOf(id)
+    if (i > -1) selectedIds.value.splice(i, 1)
+    else selectedIds.value.push(id)
+}
+
+async function batchDelete() {
+    if (!selectedIds.value.length) return
+    if (!confirm(`确定删除选中的 ${selectedIds.value.length} 条记录？`)) return
+    try {
+        await deleteUnifiedPlantsBatch(selectedIds.value)
+        msg.value = `已删除 ${selectedIds.value.length} 条记录`
+        msgType.value = 'ok'
+        selectedIds.value = []
+        refreshAll().catch(() => undefined)
+    } catch (e) {
+        msg.value = (e as Error).message || '删除失败'
+        msgType.value = 'err'
+    }
+}
+
+async function removeOne(row: UnifiedPlantRow) {
+    if (!confirm(`确定删除机组「${row.plant} / ${row.unit}」？`)) return
+    try {
+        await deleteUnifiedPlantsBatch([row.id])
+        msg.value = '已删除'
+        msgType.value = 'ok'
+        selectedIds.value = selectedIds.value.filter((id) => id !== row.id)
+        refreshAll().catch(() => undefined)
+    } catch (e) {
+        msg.value = (e as Error).message || '删除失败'
+        msgType.value = 'err'
+    }
+}
+/* ============================================
+ *  新增 / 编辑弹窗
+ * ============================================ */
+const modalVisible = ref(false)
+const editingId = ref<number | null>(null)
+const saving = ref(false)
+const formError = ref('')
+const form = reactive({
+    plant: '',
+    unit: '',
+    capacity: null as number | null,
+    city: '',
+})
+
+function openAddModal() {
+    editingId.value = null
+    form.plant = ''
+    form.unit = ''
+    form.capacity = null
+    form.city = ''
+    formError.value = ''
+    modalVisible.value = true
+}
+
+function openEditModal(row: UnifiedPlantRow) {
+    editingId.value = row.id
+    form.plant = row.plant
+    form.unit = row.unit
+    form.capacity = row.capacity
+    form.city = row.city
+    formError.value = ''
+    modalVisible.value = true
+}
+
+function closeModal() {
+    if (saving.value) return
+    modalVisible.value = false
+}
+
+async function submit() {
+    if (!form.plant.trim()) {
+        formError.value = '调度命名不能为空'
+        return
+    }
+    saving.value = true
+    formError.value = ''
+    try {
+        const payload = {
+            plant: form.plant.trim(),
+            unit: form.unit.trim(),
+            capacity: form.capacity,
+            city: form.city.trim(),
+        }
+        if (editingId.value) {
+            await updateUnifiedPlant(editingId.value, payload)
+            msg.value = '修改成功'
+        } else {
+            await addUnifiedPlant(payload)
+            msg.value = '新增成功'
+        }
+        msgType.value = 'ok'
+        modalVisible.value = false
+        refreshAll().catch(() => undefined)
+    } catch (e) {
+        formError.value = (e as Error).message || '保存失败'
+    } finally {
+        saving.value = false
+    }
+}
 /* ============================================
  *  加载 / 刷新
  * ============================================ */
@@ -507,7 +680,11 @@ async function refreshAll() {
     // 表格与地图并行，各自内部处理异常
     await Promise.all([loadTable(), loadMap()])
 }
-
+// ⭐ 每次表格加载后清理已不存在的选中项
+watch(rows, () => {
+    const ids = new Set(rows.value.map((r) => r.id))
+    selectedIds.value = selectedIds.value.filter((id) => ids.has(id))
+})
 watch(() => appStore.dataVersion, () => {
     refreshAll().catch(() => undefined)
 })
@@ -868,5 +1045,82 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
     background: #fafbfc;
     font-weight: 600;
     color: #1f2d3d;
+}
+
+/* 表格行选中 */
+.data-table tr.selected td {
+    background: #ecf5ff;
+}
+
+.data-table input[type='checkbox'] {
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    accent-color: #2d6cdf;
+}
+
+.link-btn {
+    border: none;
+    background: transparent;
+    color: #2d6cdf;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 6px;
+}
+
+.link-btn:hover {
+    text-decoration: underline;
+}
+
+.link-btn.danger {
+    color: #f56c6c;
+}
+
+/* 弹窗 */
+.mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal {
+    width: 440px;
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.modal-title {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.form-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.form-item label {
+    font-size: 13px;
+    color: #606266;
+}
+
+.req {
+    color: #f56c6c;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
 }
 </style>

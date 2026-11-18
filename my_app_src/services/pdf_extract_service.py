@@ -1,14 +1,35 @@
+"""PDF 结算单提取服务（纯后端 pdfplumber 提取）
+
+流程：
+    PDF 字节 → _extract_tables（pdfplumber + 水印过滤）→ _extract_from_pages（字段解析）
+
+水印过滤由 utils.pdf_common 完成（旋转 / 浅色 / 超大字号 / 跨页重复），
+在 pdfplumber 的 page.filter() 层面剔除水印字符后，再调用 extract_tables()。
+
+对外只有一个入口：
+    extract_pdf_data(file_bytes: bytes, fields: dict) -> dict
+"""
+
 import os
 import re
-from io import BytesIO
-import pdfplumber
+from typing import List
 
-SETTINGS_CANDIDATES = [
-    {"vertical_strategy": "lines", "horizontal_strategy": "lines"},
-    {"vertical_strategy": "lines", "horizontal_strategy": "text"},
-    {"vertical_strategy": "text", "horizontal_strategy": "text"},
-]
+from utils.pdf_common import (
+    WATERMARK_FILTER_ENABLED,
+    detect_repeat_watermarks,
+    extract_page_tables,
+    open_pdf_source,
+)
+from utils.logger import get_logger
+
+logger = get_logger("services.pdf_extract_service")
+
 NUM_PATTERN = re.compile(r"^[+-]?\d+(\.\d+)?$")
+
+
+# ============================================================
+#                     基础工具
+# ============================================================
 
 
 def _norm(s):
@@ -42,40 +63,69 @@ def _parse_month(filename):
     return os.path.splitext(base)[0]
 
 
-def _extract_tables(pdf_bytes):
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+# ============================================================
+#                     表格提取（pdfplumber）
+# ============================================================
+
+
+def _extract_tables(pdf_bytes: bytes) -> List[List[List]]:
+    """从 PDF 字节提取前两页表格（带水印过滤）
+
+    返回结构：
+        [
+            page1_tables,   # List[table]，每张 table 是 string[][]
+            page2_tables,
+        ]
+    """
+    pdf = open_pdf_source(pdf_bytes)
+    try:
         if not pdf.pages:
             return []
+
+        # 一次扫描得到水印位置集合（跨页统计必须在所有页上做才准）
+        repeat_positions = (
+            detect_repeat_watermarks(pdf) if WATERMARK_FILTER_ENABLED else set()
+        )
+
         tables = []
-        # 只处理前两页
         for page in pdf.pages[:2]:
-            page_tables = []
-            for s in SETTINGS_CANDIDATES:
-                settings = {
-                    **s,
-                    "snap_tolerance": 3,
-                    "join_tolerance": 3,
-                    "intersection_tolerance": 5,
-                }
-                page_tables = page.extract_tables(table_settings=settings) or []
-                page_tables = [
-                    t for t in page_tables if t and any(any(c for c in r) for r in t)
-                ]
-                if page_tables:
-                    break
+            page_tables = extract_page_tables(
+                page,
+                filter_watermark=WATERMARK_FILTER_ENABLED,
+                repeat_positions=repeat_positions,
+            )
             tables.append(page_tables)
         return tables
+    finally:
+        pdf.close()
 
 
-def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
-    pages_tables = _extract_tables(file_bytes)
+# ============================================================
+#                     字段解析（核心逻辑）
+# ============================================================
+
+
+def _extract_from_pages(pages_tables: List[List[List]], fields: dict) -> dict:
+    """页面表格 → 字段
+
+    参数：
+        pages_tables : [page1_tables, page2_tables]
+                       pageN_tables 是 List[table]，每张 table 是 string[][]
+        fields       : 请求字段开关 {page1_total_qty: bool, ...}
+
+    返回：
+        已填字段字典；未命中的字段不出现
+    """
     result = {}
 
-    # 提取第一页合计行
+    # ========================================================
+    #            第一页：合计行（电量 / 电价 / 电费）
+    # ========================================================
     if fields.get("page1_total_qty") or fields.get("page1_total_price"):
         page1_tables = pages_tables[0] if len(pages_tables) > 0 else []
+
         for table in page1_tables:
-            # 找表头
+            # --- 定位表头行 ---
             header_idx = -1
             idx_map = {}
             for ri, row in enumerate(table):
@@ -84,7 +134,6 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
                     "结算电价/均价" in c for c in cells
                 ):
                     header_idx = ri
-                    # 找到电量、电价、电费的位置
                     for label, key in [
                         ("结算电量/容量", "qty"),
                         ("结算电价/均价", "price"),
@@ -98,12 +147,13 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
             if header_idx == -1:
                 continue
 
-            # 找合计行
+            # --- 找合计行 ---
             for row in table[header_idx + 1 :]:
                 if not row or not any("合计" in _norm(c) for c in row):
                     continue
 
-                # 探测列偏移，从前2列到后2列尝试
+                # 探测列偏移：合并单元格会导致表头列号与数据列号错位，
+                # 从 -2 到 +2 试一遍，用电量 × 电价 ≈ 电费做校验
                 for off in (-2, -1, 0, 1, 2):
                     q = _to_number(_cell(row, idx_map["qty"] + off))
                     p = _to_number(_cell(row, idx_map["price"] + off))
@@ -115,7 +165,6 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
 
                     if q is not None and p is not None:
                         if fee is not None:
-                            # 核心逻辑：强校验 电量 * 电价 ≈ 电费
                             if abs(q * p - fee) <= max(abs(fee) * 2e-3, 5.0):
                                 if fields.get("page1_total_qty"):
                                     result["page1_total_qty"] = q
@@ -123,12 +172,12 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
                                     result["page1_total_price"] = p
                                 break
                         else:
-                            # 如果 PDF 缺失电费列，按顺序兜底
                             if fields.get("page1_total_qty"):
                                 result["page1_total_qty"] = q
                             if fields.get("page1_total_price"):
                                 result["page1_total_price"] = p
                             break
+
                 if (
                     result.get("page1_total_qty") is not None
                     or result.get("page1_total_price") is not None
@@ -140,7 +189,9 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
             ):
                 break
 
-    # ======= 第二页：日前 / 实时行解析（常规提取） =======
+    # ========================================================
+    #            第二页：日前 / 实时行
+    # ========================================================
     need_p2 = any(
         fields.get(k)
         for k in [
@@ -152,8 +203,8 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
     )
     if need_p2:
         page2_tables = pages_tables[1] if len(pages_tables) > 1 else []
+
         for table in page2_tables:
-            # 找表头
             header_idx = -1
             idx_map = {}
             for ri, row in enumerate(table):
@@ -171,7 +222,6 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
             if header_idx == -1:
                 continue
 
-            # 找具体行
             for row in table[header_idx + 1 :]:
                 row_str = "".join([_norm(c) for c in row if c])
                 is_dayahead = "日前" in row_str
@@ -190,7 +240,6 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
                         or fields.get("page2_realtime_price")
                     )
                 ):
-                    # 尝试偏移量
                     for off in (-1, 0, 1):
                         q = _to_number(_cell(row, idx_map.get("qty", 0) + off))
                         p = _to_number(_cell(row, idx_map.get("price", 0) + off))
@@ -206,7 +255,7 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
                                 if fields.get("page2_realtime_price"):
                                     result["page2_realtime_price"] = p
                             break
-                # 如果已找齐
+
                 if (
                     not fields.get("page2_dayahead_qty")
                     or result.get("page2_dayahead_qty") is not None
@@ -216,15 +265,16 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
                 ):
                     break
 
-    # ======= 提取第二页整表 (可选) =======
+    # ========================================================
+    #            第二页：整表提取（可选）
+    # ========================================================
     if fields.get("extract_page2"):
         page2_tables = pages_tables[1] if len(pages_tables) > 1 else []
         combined_table = []
-        for t_idx, table in enumerate(page2_tables):
+        for table in page2_tables:
             if combined_table:
                 combined_table.append([])
             for row in table:
-                # 过滤空行
                 if any(c is not None and str(c).strip() != "" for c in row):
                     combined_table.append(
                         [str(c).strip() if c is not None else "" for c in row]
@@ -232,3 +282,17 @@ def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
         result["page2_data"] = combined_table
 
     return result
+
+
+# ============================================================
+#                     唯一对外入口
+# ============================================================
+
+
+def extract_pdf_data(file_bytes: bytes, fields: dict) -> dict:
+    """PDF 字节 → 字段（唯一入口）
+
+    调用方：api/monthly.py 的 /extract-pdf（multipart 上传）
+    """
+    pages_tables = _extract_tables(file_bytes)
+    return _extract_from_pages(pages_tables, fields)

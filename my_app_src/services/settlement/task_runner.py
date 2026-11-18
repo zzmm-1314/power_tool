@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from services.settlement.actual import fill_data
-from services.settlement.sim_v1 import fill_simulation_data
 from services.settlement.sim_v2 import fill_simulation_data_v2
 
 tasks: Dict[str, dict] = {}
@@ -65,32 +64,15 @@ def run_task(task_id: str, task_type: str, params: dict):
                 progress_func=progress_func,
             )
 
-        elif task_type == "jiaojiang":
-            fill_simulation_data(
-                detail_folder=params["folder"],
-                fixed_power_file=params["fixed_file"],
-                strategy_file=params["strategy_file"],
-                stat_file=params["stat_file"],
-                info_file=params["info_file"],
-                target_file=params["target_file"],
-                annual_price=float(params["annual_price"]),
-                tenday_prices=[
-                    float(params["tenday_early"]),
-                    float(params["tenday_mid"]),
-                    float(params["tenday_late"]),
-                ],
-                selected_dates=params.get("selected_dates") or [],
-                log_func=log_func,
-                progress_func=progress_func,
-            )
-
         elif task_type == "general":
             fill_simulation_data_v2(
-                spot_file=params["spot_file"],
-                stat_file=params["stat_file"],
-                strategy_file=params["strategy_file"],
-                info_spot_file=params["info_spot_file"],
-                info_contract_file=params["info_contract_file"],
+                spot_data=params["spot_data"],
+                stat_data=params["stat_data"],
+                strategy_month_data=params["strategy_month_data"],
+                strategy_tenday_data=params["strategy_tenday_data"],
+                info_spot_day_data=params["info_spot_day_data"],
+                info_spot_rt_data=params["info_spot_rt_data"],
+                info_contract_data=params["info_contract_data"],
                 target_file=params["target_file"],
                 annual_price=float(params["annual_price"]),
                 monthly_price=float(params["monthly_price"]),
@@ -118,7 +100,8 @@ def run_task(task_id: str, task_type: str, params: dict):
         with _tasks_lock:
             if task_id in tasks:
                 tasks[task_id]["finished"] = True
-                tasks[task_id]["progress"]["percent"] = 100
+                if tasks[task_id]["status"] == "completed":
+                    tasks[task_id]["progress"]["percent"] = 100
                 tasks[task_id]["finishedAt"] = datetime.now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )

@@ -1,5 +1,21 @@
 <template>
     <PageContainer title="合约分解">
+        <!-- ⭐ 新增：基础配置缺失警告 -->
+        <div v-if="!hasCurve || !hasHoliday" class="config-warning">
+            <div class="warn-icon">⚠️</div>
+            <div class="warn-content">
+                <p class="warn-title">检测到您尚未完成基础数据配置，可能无法正常生成分解！</p>
+                <ul class="warn-list">
+                    <li v-if="!hasCurve">缺失 <strong>典型曲线</strong> （<span class="req">必填</span>，否则无法计算）</li>
+                    <li v-if="!hasHoliday">缺失 <strong>年度节假日</strong> （选填，未配置时将不识别法定节假日）</li>
+                </ul>
+            </div>
+            <div class="warn-action">
+                <router-link to="/contract/config" class="btn btn-primary btn-sm">
+                    去配置 →
+                </router-link>
+            </div>
+        </div>
         <!-- 顶部查询条件 -->
         <div class="filter-bar">
             <div class="filter-item">
@@ -71,9 +87,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import { request } from '@/api/request'
+import { useRouter } from 'vue-router'
+const router = useRouter()
 const loading = ref(false)
 const exporting = ref(false)
 const activeTab = ref<'year' | 'month' | 'tenday1' | 'tenday2' | 'tenday3'>('year')
@@ -87,7 +105,9 @@ const query = reactive({
 const times = ref<string[]>([])
 const resultData = ref<any>(null)
 const hasData = computed(() => resultData.value !== null)
-
+// 定义配置状态
+const hasCurve = ref(true)
+const hasHoliday = ref(true)
 const currentData = computed(() => {
     if (!resultData.value) return []
     return resultData.value[activeTab.value] || []
@@ -114,9 +134,27 @@ interface DecomposeData {
     tenday2: DayData[]
     tenday3: DayData[]
 }
-
+async function checkConfigStatus() {
+    try {
+        const res = await request<{ has_curve: boolean, has_holiday: boolean }>({
+            url: '/contract/config/status',
+            method: 'get'
+        })
+        hasCurve.value = res.has_curve
+        hasHoliday.value = res.has_holiday
+    } catch (e) {
+        console.warn('检查基础配置状态失败', e)
+    }
+}
 // 修改原先的 submit/loadData 函数
 async function loadData() {
+    // ⭐ 新增：生成前校验
+    if (!hasCurve.value) {
+        if (confirm('数据库中缺失「典型曲线」，无法生成分解。是否现在去配置？')) {
+            router.push('/contract/config')
+        }
+        return
+    }
     if (!query.year || !query.month) return
     loading.value = true
 
@@ -147,7 +185,27 @@ async function loadData() {
 }
 
 async function exportData() {
-    // 导出逻辑保持不变
+    if (!resultData.value) return
+    try {
+        const res = await fetch('/api/contract/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                resultData: resultData.value,
+                times: times.value,
+            }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = '合约分解结果.xlsx'
+        a.click()
+        URL.revokeObjectURL(url)
+    } catch (e) {
+        alert('导出失败：' + (e as Error).message)
+    }
 }
 
 function getRowBg(type: string) {
@@ -156,6 +214,9 @@ function getRowBg(type: string) {
     if (type === '法定节假日') return '#fef0f0'
     return '#ffffff'
 }
+onMounted(() => {
+    checkConfigStatus()
+})
 </script>
 
 <style scoped>
@@ -336,5 +397,62 @@ function getRowBg(type: string) {
     align-items: center;
     justify-content: center;
     color: #909399;
+}
+
+/* ===== 基础配置缺失警告横幅 ===== */
+.config-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    background: #fdf6ec;
+    border: 1px solid #f5dab1;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+}
+
+.warn-icon {
+    font-size: 24px;
+    line-height: 1.2;
+}
+
+.warn-content {
+    flex: 1;
+}
+
+.warn-title {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #b88230;
+}
+
+.warn-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: #a16d1d;
+    line-height: 1.6;
+}
+
+.warn-list .req {
+    color: #f56c6c;
+    font-weight: 600;
+}
+
+.warn-action {
+    display: flex;
+    align-items: center;
+    align-self: center;
+}
+
+.btn-sm {
+    height: 30px;
+    padding: 0 16px;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
 }
 </style>

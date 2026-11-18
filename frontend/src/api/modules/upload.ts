@@ -12,11 +12,11 @@ export interface UploadItemResult {
     dates?: string[]
     devices?: string[]
     nodes?: string[]
-    ignoredNodes?: string[] // 文件中存在但未录入的节点
     count?: number
     saved?: boolean // 是否已写入数据库；false 表示仅内存预览
     dbError?: string
     error?: string
+
 }
 
 export interface UploadBatchResult {

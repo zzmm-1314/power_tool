@@ -72,3 +72,40 @@ def download_template():
         as_attachment=True,
         download_name="统调电厂导入模板.xlsx",
     )
+
+
+@unified_plants_bp.post("/item")
+def add_item():
+    """新增单条统调电厂记录"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("plant"):
+        return fail("调度命名不能为空")
+    res = svc.add_plant(data)
+    if not res["ok"]:
+        return fail(res["error"])
+    return success(res, msg="已新增")
+
+
+@unified_plants_bp.put("/item/<int:record_id>")
+def update_item(record_id: int):
+    """修改单条记录"""
+    data = request.get_json(silent=True) or {}
+    if not data.get("plant"):
+        return fail("调度命名不能为空")
+    res = svc.update_plant(record_id, data)
+    if not res["ok"]:
+        return fail(res["error"])
+    return success(msg="已修改")
+
+
+@unified_plants_bp.delete("/item/batch")
+def delete_items_batch():
+    """批量删除记录"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return fail("请提供要删除的记录 ID 列表")
+    res = svc.delete_plants_batch(ids)
+    if not res["ok"]:
+        return fail(res["error"])
+    return success(res, msg=f"已删除 {res['count']} 条记录")

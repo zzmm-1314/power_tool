@@ -1,6 +1,7 @@
 import { request } from '../request'
 
 export interface UnifiedPlantRow {
+    id: number;
     plant: string
     unit: string
     capacity: number | null
@@ -28,7 +29,7 @@ export function importUnifiedPlants(file: File) {
 }
 
 export function clearUnifiedPlants() {
-    return request<void>({
+    return request<null>({
         url: '/unified-plants/import',
         method: 'delete',
     })
@@ -83,4 +84,43 @@ export function fetchUnifiedPlantsCities() {
         url: '/unified-plants/cities',
         method: 'get',
     })
+}
+
+export function addUnifiedPlant(payload: {
+    plant: string
+    unit?: string
+    capacity?: number | null
+    city?: string
+}) {
+    return request<{ id: number }>({
+        url: '/unified-plants/item',
+        method: 'post',
+        data: payload,
+    })
+}
+
+export function updateUnifiedPlant(recordId: number, payload: {
+    plant: string
+    unit?: string
+    capacity?: number | null
+    city?: string
+}) {
+    return request<void>({
+        url: `/unified-plants/item/${recordId}`,
+        method: 'put',
+        data: payload,
+    })
+}
+
+export function deleteUnifiedPlantsBatch(ids: number[]) {
+    return request<{ count: number }>({
+        url: '/unified-plants/item/batch',
+        method: 'delete',
+        data: { ids },
+    })
+}
+
+export function downloadUnifiedPlantsTemplate() {
+    // 文件下载直连后端（不走 axios 拦截器）
+    window.open(`${import.meta.env.VITE_API_BASE_URL || '/api'}/unified-plants/template`, '_blank')
 }

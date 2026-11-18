@@ -8,8 +8,10 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import TimeSeriesSplit
 import warnings
+from utils.logger import get_logger
+
+logger = get_logger("services.coefficient.ml_enhancer")
 
 warnings.filterwarnings("ignore")
 
@@ -24,9 +26,7 @@ class RidgeGapPredictor:
         self.scalers = {}  # 每个时段一个标准化器
         self.is_trained = False
 
-    def _create_features(
-        self, series, weather_row=None, ext_ratio=None, load_ratio=None
-    ):
+    def _create_features(self, series):
         """
         针对单个时段（48点中的某一点）构建特征矩阵
         series: 该时段的历史价差序列（长度=天数）
@@ -72,9 +72,7 @@ class RidgeGapPredictor:
 
         return X
 
-    def train(
-        self, history_df, weather_df=None, external_series=None, load_series=None
-    ):
+    def train(self, history_df):
         """
         对每个时段独立训练Ridge模型
         history_df: 包含 'date' 和 '0'..'47' 列
@@ -114,11 +112,9 @@ class RidgeGapPredictor:
             self.scalers[col] = scaler
 
         self.is_trained = True
-        print(f"ML增强模块训练完成，成功建模时段: {len(self.models)}/48")
+        logger.info(f"ML增强模块训练完成，成功建模时段: {len(self.models)}/48")
 
-    def predict_offset(
-        self, hour, recent_series, weather_row=None, ext_ratio=None, load_ratio=None
-    ):
+    def predict_offset(self, hour, recent_series):
         """
         预测某个时段的价差偏离，并转换为系数偏移量
         返回: float，范围 [-0.05, 0.05]

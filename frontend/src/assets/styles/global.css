@@ -1,4 +1,67 @@
-/* 全局状态：所有容器均采用局部滚动 */
+/* ============================================================
+   全局样式表 —— 全站统一的设计令牌与通用组件样式
+   各页面 scoped 样式只保留「本页特有」的规则，通用规则一律在此定义
+   ============================================================ */
+
+/* ==================== 设计令牌 ==================== */
+:root {
+    /* 主色 */
+    --primary: #2d6cdf;
+    --primary-light: #ecf3ff;
+    --primary-hover: #2459b8;
+    --primary-active: #1b4a9e;
+
+    /* 语义色 */
+    --success: #67c23a;
+    --success-bg: #f0f9eb;
+    --danger: #f56c6c;
+    --danger-bg: #fef0f0;
+    --warning: #e6a23c;
+    --warning-bg: #fdf6ec;
+
+    /* 背景 */
+    --bg-body: #f5f7fa;
+    --bg-card: #ffffff;
+    --bg-subtle: #f0f2f5;
+    --bg-header: #f7f9fc;
+    --bg-hover: #f9fafc;
+
+    /* 文字 */
+    --text-1: #1f2d3d;
+    --text-2: #303133;
+    --text-3: #606266;
+    --text-4: #909399;
+    --text-5: #c0c4cc;
+
+    /* 描边 */
+    --border: #ebeef5;
+    --border-strong: #dcdfe6;
+
+    /* 圆角 */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    /* 阴影：三级递进，卡片用 sm，浮起用 md，弹层用 lg */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 2px 12px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.18);
+
+    /* 控件尺寸基线 */
+    --control-h: 32px;
+    --control-h-sm: 28px;
+    --control-h-lg: 34px;
+
+    /* 动效 */
+    --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+    --dur: 0.2s;
+
+    --header-h: 56px;
+    --sidebar-w: 210px;
+}
+
+/* ==================== 基础重置 ==================== */
+/* 全局状态：页面级不滚动，所有容器局部滚动 */
 html,
 body,
 #app {
@@ -6,18 +69,27 @@ body,
     margin: 0;
     padding: 0;
     overflow: hidden;
-    /* 页面级不滚动 */
 }
 
-* {
+*,
+*::before,
+*::after {
     box-sizing: border-box;
 }
 
 body {
-    font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 14px;
-    color: #303133;
-    background: #f5f7fa;
+    line-height: 1.5;
+    color: var(--text-2);
+    background: var(--bg-body);
+    -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+    background: var(--primary-light);
+    color: var(--primary);
 }
 
 /* 局部滚动容器统一类 */
@@ -27,50 +99,572 @@ body {
     overflow-x: hidden;
 }
 
-/* 滚动条美化 */
-.scroll-y::-webkit-scrollbar {
+/* ==================== 滚动条 ==================== */
+::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
-.scroll-y::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
     background: #c8cdd6;
     border-radius: 4px;
 }
 
-.scroll-y::-webkit-scrollbar-track {
-    background: transparent;
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-4);
 }
 
-/* ================= 全局美化原生文件上传按钮 ================= */
+/* ==================== 表单控件 ==================== */
+input,
+select,
+textarea,
+button {
+    font-family: inherit;
+    transition: border-color var(--dur), box-shadow var(--dur), background var(--dur),
+        color var(--dur);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 3px rgba(45, 108, 223, 0.1) !important;
+    outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-5);
+}
+
+/* 输入框 / 下拉 / 多行文本的统一基线 */
+.input,
+.select,
+.textarea {
+    height: var(--control-h);
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-2);
+    font-size: 13px;
+    outline: none;
+}
+
+.select {
+    cursor: pointer;
+}
+
+.textarea {
+    height: auto;
+    padding: 6px 10px;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+    background: var(--bg-body);
+    color: var(--text-5);
+    cursor: not-allowed;
+}
+
+.input.small {
+    width: 120px;
+}
+
+/* 原生文件上传按钮 */
 input[type="file"] {
     font-size: 13px;
-    color: #606266;
-    /* 防止右侧文字溢出 */
+    color: var(--text-3);
     max-width: 100%;
 }
 
 input[type="file"]::file-selector-button {
-    height: 32px;
+    height: var(--control-h);
     padding: 0 16px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    background: #f5f7fa;
-    color: #606266;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-body);
+    color: var(--text-3);
     font-size: 13px;
     font-family: inherit;
     cursor: pointer;
     margin-right: 10px;
-    transition: all 0.2s ease;
+    transition: all var(--dur) var(--ease);
 }
 
 input[type="file"]::file-selector-button:hover {
-    background: #ecf5ff;
-    color: #2d6cdf;
-    border-color: #2d6cdf;
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: var(--primary);
 }
 
-/* 针对某些特定的隐藏 input 内层微调（如隐藏了原生 input 的封装） */
+.file-input {
+    font-size: 13px;
+}
+
 .hidden-input {
     display: none !important;
+}
+
+/* ==================== 按钮 ==================== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--control-h);
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: var(--primary);
+    color: #fff;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+        color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+.btn:active:not(:disabled) {
+    background: var(--primary-active);
+}
+
+.btn:disabled {
+    background: #a9bfe0;
+    color: #fff;
+    cursor: not-allowed;
+}
+
+/* 主要按钮（与默认态一致，语义化写法） */
+.btn.primary {
+    background: var(--primary);
+    color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+/* 次要按钮：白底描边 */
+.btn.ghost {
+    background: var(--bg-card);
+    color: var(--text-3);
+    border: 1px solid var(--border-strong);
+}
+
+.btn.ghost:hover:not(:disabled) {
+    background: var(--bg-header);
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn.ghost:disabled {
+    background: var(--bg-subtle);
+    color: var(--text-5);
+    border-color: var(--border);
+}
+
+/* 小尺寸 */
+.btn.small {
+    height: 26px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+/* 独立的主按钮写法（历史遗留类名） */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--control-h-lg);
+    padding: 0 20px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: var(--primary);
+    color: #fff;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+.btn-primary:disabled {
+    background: #a9bfe0;
+    cursor: not-allowed;
+}
+
+/* 清空 / 重置类小按钮 */
+.btn-clear {
+    height: var(--control-h);
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-3);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-clear:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+/* 页面右上角「上传」按钮 */
+.btn-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: var(--control-h);
+    padding: 0 14px;
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--primary);
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.btn-upload:hover {
+    background: var(--primary);
+    color: #fff;
+}
+
+/* ==================== 卡片与容器 ==================== */
+.card,
+.form-card {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.form-card {
+    padding: 16px 20px;
+}
+
+.panel {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+}
+
+.result-card {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* 表格外壳：只给滚动能力与圆角，视觉容器由所在卡片决定 */
+.table-wrap {
+    position: relative;
+    overflow: auto;
+    border-radius: var(--radius-sm);
+}
+
+.table-wrap.loading {
+    opacity: 0.6;
+}
+
+/* 筛选条 */
+.filter-bar {
+    display: flex;
+    gap: 16px;
+    background: var(--bg-card);
+    padding: 16px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    flex-wrap: wrap;
+}
+
+.filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-item label,
+.lbl {
+    font-size: 13px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+
+/* 指标卡 */
+.stat-cards {
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.stat-card {
+    flex: 1;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--border-strong);
+    transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.stat-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.stat-label {
+    font-size: 13px;
+    color: var(--text-3);
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 附加操作区 */
+.extra-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+/* ==================== 表格 ==================== */
+.data-table {
+    width: 100%;
+}
+
+.data-table tbody tr:hover {
+    background-color: var(--bg-hover) !important;
+}
+
+/* ==================== 表单布局 ==================== */
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+
+.form-row>label {
+    flex-shrink: 0;
+    padding-top: 8px;
+    font-size: 13px;
+    color: var(--text-3);
+    text-align: right;
+}
+
+.form-item label {
+    font-size: 13px;
+    color: var(--text-3);
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.separator {
+    color: var(--text-4);
+}
+
+/* ==================== 弹窗 ==================== */
+.mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: qw-fade-in var(--dur) var(--ease);
+}
+
+.modal {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    animation: qw-pop-in 0.22s var(--ease);
+}
+
+.modal-header {
+    padding: 18px 24px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.modal-subtitle {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-4);
+}
+
+.modal-body {
+    flex: 1;
+    padding: 16px 24px;
+    overflow-y: auto;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-header);
+}
+
+@keyframes qw-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes qw-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ==================== 提示与空态 ==================== */
+.msg {
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.msg.err {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.msg.ok {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.hint {
+    font-size: 12px;
+    color: var(--text-4);
+}
+
+.empty-tip {
+    color: var(--text-4);
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+.empty-tip code {
+    padding: 1px 6px;
+    background: #f4f4f5;
+    border-radius: 3px;
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+/* ================= 1. 下拉框 (Select) 美化 ================= */
+select.input {
+    /* 消除系统默认的外观 */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    /* 自定义下拉箭头 (SVG 编码) */
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16'%3E%3Cpath fill='%23909399' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 28px !important;
+    /* 给右侧箭头留出空间 */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+select.input:hover {
+    border-color: #c0c4cc;
+    /* 悬浮时箭头变成主题蓝 */
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16'%3E%3Cpath fill='%232d6cdf' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+}
+
+/* 禁用状态 */
+select.input:disabled {
+    background-color: #f5f7fa;
+    color: #c0c4cc;
+    cursor: not-allowed;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16'%3E%3Cpath fill='%23c0c4cc' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+}
+
+/* ================= 2. 日期选择器 (Date) 美化 ================= */
+input[type="date"].input {
+    position: relative;
+    cursor: pointer;
+    font-family: inherit;
+    color: #303133;
+}
+
+/* 让文字垂直居中 */
+input[type="date"]::-webkit-datetime-edit {
+    padding-top: 1px;
+}
+
+/* 替换原生日历图标的外观 */
+input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    /* 可选：用 SVG 替换原生图标，如果觉得原生太丑可以解开下面注释 */
+    /* background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23606266' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z'/%3E%3C/svg%3E");
+    /* background-repeat: no-repeat; */
+    /* background-size: contain; */
+    /* width: 14px; */
+    /* height: 14px; */
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+td {
+    text-align: center;
 }

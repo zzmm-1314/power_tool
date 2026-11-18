@@ -1,38 +1,56 @@
 <template>
     <!-- 绑定动态样式，控制容器高度 -->
     <div class="heat-wrap" :style="wrapStyle">
-        <div ref="gridRef" class="heat-grid" :style="gridStyle">
-            <!-- 表头 -->
-            <div class="cell corner">时间\日期</div>
-            <div v-for="d in dates" :key="'h-' + d" class="cell date-cell" :title="d">
-                {{ shortDate(d) }}
-            </div>
-
-            <!-- 行标签 + 数据行 -->
-            <template v-for="(h, hIdx) in displayHours" :key="'r-' + hIdx">
-                <div class="cell row-label">{{ h }}</div>
-                <div v-for="(d, dIdx) in dates" :key="'c-' + hIdx + '-' + dIdx" class="cell data-cell"
-                    :class="{ empty: displayMatrix[hIdx]?.[dIdx] == null }" :style="{
-                        background: cellBg(displayMatrix[hIdx]?.[dIdx]),
-                        fontSize: cellFontSize,
-                        '--hover-inset-x': hoverInsetX,
-                    }">
-                    <span class="cell-num">{{ formatCell(displayMatrix[hIdx]?.[dIdx]) }}</span>
-                </div>
-            </template>
-
-            <!-- 日均值行 -->
-            <template v-if="showDailyAvg && dailyAvg.length">
-                <div class="cell row-label avg-label">日均</div>
-                <div v-for="(d, dIdx) in dates" :key="'avg-' + dIdx" class="cell data-cell avg-cell"
-                    :class="{ empty: dailyAvg[dIdx] == null }" :style="{
-                        background: cellBg(dailyAvg[dIdx], true),
-                        fontSize: cellFontSize,
-                        '--hover-inset-x': hoverInsetX,
-                    }">
-                    <span class="cell-num">{{ formatCell(dailyAvg[dIdx]) }}</span>
-                </div>
-            </template>
+        <div class="heat-scroll">
+            <table class="heat-table">
+                <thead>
+                    <tr>
+                        <th class="sticky-col col-time">时间\日期</th>
+                        <template v-if="mode === 'spread'">
+                            <th class="sticky-col col-stat" style="left: 60px;">正价差占比</th>
+                            <th class="sticky-col col-stat" style="left: 130px;">价差总和</th>
+                        </template>
+                        <th v-for="d in dates" :key="'h-' + d">{{ shortDate(d) }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="(h, hIdx) in displayHours" :key="'r-' + hIdx">
+                        <td class="sticky-col col-time">{{ h }}</td>
+                        <template v-if="mode === 'spread'">
+                            <!-- 将原来的 :style="{ background: ratioBg(...) }" 替换为： -->
+                            <td class="sticky-col col-stat" style="left: 60px;" :style="ratioStyle(rowPosRatio[hIdx])">
+                                {{ rowPosRatio[hIdx] }}
+                            </td>
+                            <td class="sticky-col col-stat" style="left: 130px;" :style="sumStyle(rowSum[hIdx])">
+                                {{ rowSum[hIdx] }}
+                            </td>
+                        </template>
+                        <td v-for="(d, dIdx) in dates" :key="'c-' + hIdx + '-' + dIdx"
+                            :class="{ 'empty-cell': displayMatrix[hIdx]?.[dIdx] == null }"
+                            :style="{ background: cellBg(displayMatrix[hIdx]?.[dIdx]) }">
+                            <div class="cell-content">
+                                {{ formatCell(displayMatrix[hIdx]?.[dIdx]) }}
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+                <tfoot v-if="showDailyAvg && realDailyAvg.length">
+                    <!-- 日均值行 -->
+                    <tr class="sticky-bottom-row">
+                        <td class="sticky-col col-time" style="background: #ecf5ff; color: #2d6cdf; font-weight: 600;">
+                            日均</td>
+                        <template v-if="mode === 'spread'">
+                            <td class="sticky-col col-stat" style="left: 60px; background: #ecf5ff;"></td>
+                            <td class="sticky-col col-stat" style="left: 130px; background: #ecf5ff;"></td>
+                        </template>
+                        <td v-for="(d, dIdx) in dates" :key="'avg-' + dIdx"
+                            :class="{ 'empty-cell': realDailyAvg[dIdx] == null }"
+                            :style="{ background: cellBg(realDailyAvg[dIdx], true) }">
+                            <div class="cell-content">{{ formatCell(realDailyAvg[dIdx]) }}</div>
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
         </div>
 
         <!-- 底部：图例 + 总均值 -->
@@ -73,7 +91,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, type CSSProperties } from 'vue'
+
 
 interface Props {
     dates: string[]
@@ -82,7 +101,8 @@ interface Props {
     mode?: 'price' | 'spread'
     basePrice?: number
     showDailyAvg?: boolean
-    dailyAvg?: (number | null)[]
+    dailyAvg?: (number | null)[],
+    showPositiveRatio?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -90,12 +110,21 @@ const props = withDefaults(defineProps<Props>(), {
     basePrice: 350,
     showDailyAvg: true,
     dailyAvg: () => [],
+    showPositiveRatio: false,
 })
 
-/* ---------------- 过滤掉末尾多余的空行 ---------------- */
+/* ---------------- 过滤掉末尾多余的空行 & 深度清洗数据 ---------------- */
 const displayMatrix = computed(() => {
     const len = Math.min(props.hours.length, props.matrix.length)
-    let m = props.matrix.slice(0, len)
+    // ⭐ 核心：深度清洗，把所有的字符串、空值、NaN 都转为 null，保证全是纯数字
+    let m = props.matrix.slice(0, len).map(row =>
+        row.map(v => {
+            if (v == null) return null
+            const num = Number(v)
+            return isNaN(num) ? null : num
+        })
+
+    )
     if (m.length > 1 && m[m.length - 1].every((v) => v == null)) {
         m = m.slice(0, -1)
     }
@@ -105,28 +134,33 @@ const displayMatrix = computed(() => {
 const displayHours = computed(() => {
     return props.hours.slice(0, displayMatrix.value.length)
 })
+/* ---------------- ⭐ 内部重算日均值（彻底解决 - 的问题） ---------------- */
+const realDailyAvg = computed<(number | null)[]>(() => {
+    return props.dates.map((_, dIdx) => {
+        const col = displayMatrix.value
+            .map((row) => row[dIdx])
+            .filter((v): v is number => v !== null)
+        if (!col.length) return null
+        const sum = col.reduce((a, b) => a + b, 0)
+        if (!isFinite(sum)) return null
+        return Math.round((sum / col.length) * 1000) / 1000
+    })
+})
 
 /* ---------------- 动态高度策略 ---------------- */
-// 大于24行（即48点价差数据）时，取消固定视口高度，允许随内容撑开变大
-const isLargeGrid = computed(() => displayHours.value.length > 24)
-
-const wrapStyle = computed(() => {
-    return isLargeGrid.value
-        ? { height: 'auto', minHeight: 'auto' }
-        : { height: 'calc(100vh - 240px)', minHeight: '520px' }
+const wrapStyle = computed<CSSProperties>(() => {
+    return { height: 'calc(100vh - 210px)', display: 'flex', flexDirection: 'column' }
 })
+
 
 /* ---------------- 布局：行高列宽自动均分 ---------------- */
 const gridStyle = computed(() => {
     const cols = props.dates.length
-    const rows = displayHours.value.length + (props.showDailyAvg && props.dailyAvg.length ? 1 : 0)
-
-    // 48点数据时，给每行限制最小高度 24px，避免挤压；24点数据时均分充满容器
-    const rowTemplate = isLargeGrid.value ? 'minmax(24px, 1fr)' : 'minmax(0, 1fr)'
-
+    const rows = displayHours.value.length + (props.showDailyAvg && realDailyAvg.value.length ? 1 : 0)
     return {
-        gridTemplateColumns: `48px repeat(${cols}, minmax(0, 1fr))`,
-        gridTemplateRows: `24px repeat(${rows}, ${rowTemplate})`,
+        // ⭐ 增加 48px 时间列 + 70px 占比列 + 70px 总和列 + 日期列
+        gridTemplateColumns: `48px 70px 70px repeat(${cols}, minmax(0, 1fr))`,
+        gridTemplateRows: `24px repeat(${rows}, minmax(0, 1fr))`,
     }
 })
 
@@ -155,22 +189,36 @@ const cellWidth = computed(() => {
     return Math.max(avail / cols, 8)
 })
 
-const hoverInsetX = computed(() => {
-    const origFont = parseFloat(cellFontSize.value) || 10
-    const ratioByFont = (HOVER_FONT_SIZE / origFont) * HOVER_EXTRA_RATIO
-    const ratioByFit = HOVER_TARGET_WIDTH / cellWidth.value
-    const ratio = Math.min(ratioByFont, Math.max(1, ratioByFit))
-    return `-${(((ratio - 1) / 2) * 100).toFixed(1)}%`
-})
-
 /* ---------------- 数字格式：日期多时只显示整数 ---------------- */
 const decimalDigits = computed(() => {
     return props.dates.length <= 15 ? 1 : 0
 })
 
-function formatCell(v: number | null): string {
-    if (v == null) return ''
-    return v.toFixed(decimalDigits.value)
+const rowStats = computed(() => {
+    const posRatio: string[] = []
+    const sum: string[] = []
+    for (let i = 0; i < displayMatrix.value.length; i++) {
+        let valid = 0, positive = 0, total = 0
+        for (const v of displayMatrix.value[i]) {
+            if (v != null) {
+                valid++
+                if (v > 0) positive++
+                total += v
+            }
+        }
+        posRatio.push(valid === 0 ? '-' : ((positive / valid) * 100).toFixed(2) + '%')
+        sum.push(valid === 0 ? '-' : total.toFixed(2))
+    }
+    return { posRatio, sum }
+})
+const rowPosRatio = computed(() => rowStats.value.posRatio)
+const rowSum = computed(() => rowStats.value.sum)
+
+function formatCell(v: number | string | null | undefined): string {
+    if (v == null || v === '') return ''
+    const num = Number(v)
+    if (isNaN(num)) return '' // 如果是无法转成数字的字符串，直接显示空白，不再显示 '-'
+    return num.toFixed(decimalDigits.value)
 }
 
 /* ---------------- 日期简写 ---------------- */
@@ -194,7 +242,7 @@ const overallAvg = computed<number | null>(() => {
     const vals: number[] = []
     for (const row of displayMatrix.value) {
         for (const v of row) {
-            if (v != null) vals.push(v)
+            if (v != null) vals.push(v) // 直接用清洗后的数据
         }
     }
     if (!vals.length) return null
@@ -209,7 +257,7 @@ const priceRange = computed(() => {
     for (const row of displayMatrix.value) {
         for (const v of row) {
             if (v == null) continue
-            const d = v - base
+            const d = v - base // 直接用清洗后的数据
             if (d > 0 && d > maxAbove) maxAbove = d
             if (d < 0 && -d > maxBelow) maxBelow = -d
         }
@@ -223,16 +271,58 @@ const spreadRange = computed(() => {
     for (const row of displayMatrix.value) {
         for (const v of row) {
             if (v == null) continue
-            if (v > maxPos) maxPos = v
+            if (v > maxPos) maxPos = v // 直接用清洗后的数据
             if (v < 0 && -v > maxNeg) maxNeg = -v
         }
     }
     return { maxPos, maxNeg }
 })
 
-/* ---------------- 单元格背景色 ---------------- */
+// 记录价差总和的极值，用于色阶映射
+const sumAbsMax = computed(() => {
+    let max = 1
+    for (const s of rowSum.value) {
+        if (s !== '-') {
+            const v = Math.abs(Number(s))
+            if (v > max) max = v
+        }
+    }
+    return max
+})
+
+// ⭐ 正价差占比色阶（以 50% 为基准，深红/深绿底 + 白字）
+function ratioStyle(ratioStr: string) {
+    if (ratioStr === '-') return { background: '#fafbfc', color: 'transparent' }
+    const ratio = parseFloat(ratioStr)
+    const delta = ratio - 50
+    const t = Math.min(1, Math.abs(delta) / 50)
+    const l = 85 - 45 * t
+    const s = Math.max(40, 50 + 40 * t)
+
+    // ⭐ 强制黑色加粗
+    const textStyle = { color: '#000000', fontWeight: 'bold' }
+    if (delta > 0) return { background: `hsl(0, ${s}%, ${l}%)`, ...textStyle }
+    if (delta < 0) return { background: `hsl(130, ${s}%, ${l}%)`, ...textStyle }
+    return { background: '#eef0f3', ...textStyle }
+}
+// ⭐ 价差总和色阶（以 0 为基准，深红/深绿底 + 白字）
+function sumStyle(sumStr: string) {
+    if (sumStr === '-') return { background: '#fafbfc', color: 'transparent' }
+    const sum = Number(sumStr)
+    if (Math.abs(sum) < 0.01) return { background: '#eef0f3', color: '#000000', fontWeight: 'bold' }
+
+    const t = Math.min(1, Math.abs(sum) / (sumAbsMax.value || 1))
+    const l = 85 - 45 * t
+    const s = Math.max(40, 50 + 40 * t)
+
+    // ⭐ 强制黑色加粗
+    const textStyle = { color: '#000000', fontWeight: 'bold' }
+    if (sum > 0) return { background: `hsl(0, ${s}%, ${l}%)`, ...textStyle }
+    return { background: `hsl(130, ${s}%, ${l}%)`, ...textStyle }
+}
+/* ---------------- 单元格背景色（简化判断逻辑） ---------------- */
 function cellBg(v: number | null, isAvg = false): string {
-    if (v == null) return '#f5f7fa'
+    if (v == null) return '#f5f7fa' // 因为传进来的值已经是 number | null 了
 
     if (props.mode === 'price') {
         const { base, maxAbove, maxBelow } = priceRange.value
@@ -245,12 +335,12 @@ function cellBg(v: number | null, isAvg = false): string {
             const t = Math.min(1, delta / maxAbove)
             const s = Math.max(20, 65 + 30 * t + satAdj)
             const l = 92 - 46 * t
-            return `hsl(0, ${s}%, ${l}%)` // 高于基准：红色
+            return `hsl(0, ${s}%, ${l}%)`
         } else {
             const t = Math.min(1, -delta / maxBelow)
             const s = Math.max(20, 55 + 30 * t + satAdj)
             const l = 92 - 46 * t
-            return `hsl(130, ${s}%, ${l}%)` // 低于基准：绿色
+            return `hsl(130, ${s}%, ${l}%)`
         }
     }
 
@@ -259,13 +349,11 @@ function cellBg(v: number | null, isAvg = false): string {
     const satAdj = isAvg ? -20 : 0
 
     if (v > 0) {
-        // 价差 > 0：日前 > 实时，绿色
         const t = Math.min(1, v / maxPos)
         const s = Math.max(20, 55 + 30 * t + satAdj)
         const l = 92 - 46 * t
         return `hsl(130, ${s}%, ${l}%)`
     } else if (v < 0) {
-        // 价差 < 0：实时 > 日前，红色
         const t = Math.min(1, -v / maxNeg)
         const s = Math.max(20, 65 + 30 * t + satAdj)
         const l = 92 - 46 * t
@@ -302,103 +390,112 @@ onBeforeUnmount(() => {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-.heat-grid {
+.heat-scroll {
     flex: 1;
-    display: grid;
-    gap: 1px;
-    background: #eef0f3;
+    overflow: auto;
     border: 1px solid #eef0f3;
     border-radius: 4px;
-    min-height: 0;
-}
-
-/* ============ 单元格通用 ============ */
-.cell {
-    display: flex;
-    align-items: center;
-    justify-content: center;
     position: relative;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    user-select: none;
 }
 
-/* ============ 表头 ============ */
-.corner,
-.date-cell {
-    background: #f5f7fa;
-    color: #303133;
-    font-weight: 600;
+.heat-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 11px;
+    text-align: center;
+    table-layout: fixed;
+}
+
+.heat-table th,
+.heat-table td {
+    border-right: 1px solid #eef0f3;
+    border-bottom: 1px solid #eef0f3;
+    height: 26px;
+    padding: 0 4px;
+    min-width: 60px;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
 }
 
-.corner {
-    z-index: 2;
-}
-
-/* ============ 行标签（时间列） ============ */
-.row-label {
+.heat-table th {
     background: #f5f7fa;
     color: #303133;
-    font-weight: 500;
-    font-size: 11px;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
-.avg-label {
-    background: #ecf5ff;
-    color: #2d6cdf;
+.heat-table tr:hover td {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* 冻结列 */
+.sticky-col {
+    position: sticky;
+    background: #f8f9fb;
+    z-index: 11;
+    font-weight: 500;
+}
+
+.col-time {
+    left: 0;
+    width: 60px;
+    min-width: 60px;
+}
+
+.col-stat {
+    width: 70px;
+    min-width: 70px;
+    background: #fdf6ec;
+    color: #e6a23c;
     font-weight: 600;
 }
 
-/* ============ 数据单元格 ============ */
-.data-cell {
-    cursor: crosshair;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-    z-index: 1;
+/* 冻结表头和表头的左上交叉 */
+.heat-table th.sticky-col {
+    z-index: 20;
+    background: #f5f7fa;
 }
 
-.data-cell.empty {
-    background: #fafbfc !important;
+.heat-table th.col-stat {
+    background: #fdf6ec;
 }
 
-/* ============ 悬浮放大 ============ */
-.data-cell:hover {
-    transform: none;
-    overflow: visible;
-    z-index: 30;
-    font-size: 13px !important;
-    font-weight: 700;
+/* 冻结底部行 */
+.sticky-bottom-row td {
+    position: sticky;
+    bottom: 0;
+    z-index: 11;
+    background: #fff;
+    border-top: 2px solid #dcdfe6;
 }
 
-.data-cell:hover::after {
-    content: '';
-    position: absolute;
-    inset: -50% var(--hover-inset-x, 0);
+.sticky-bottom-row .sticky-col {
+    z-index: 20;
+}
+
+/* 悬浮放大效果 */
+.cell-content {
+    display: inline-block;
+    padding: 2px 4px;
+    border-radius: 2px;
+    transition: transform 0.1s;
+}
+
+td:hover .cell-content {
+    transform: scale(1.4);
     background: inherit;
-    border-radius: 3px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.32);
-    outline: 2px solid #1f2d3d;
-    outline-offset: -2px;
-    z-index: -1;
-    pointer-events: none;
+    font-weight: bold;
+    position: relative;
+    z-index: 30;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    outline: 1px solid #1f2d3d;
 }
 
-/* ============ 单元格数字 ============ */
-.cell-num {
-    font-size: inherit;
-    font-weight: 500;
-    color: #1f2d3d;
-    pointer-events: none;
-    white-space: nowrap;
-    line-height: 1;
-    text-shadow: 0 0 1px rgba(255, 255, 255, 0.9);
-}
-
-.data-cell.empty .cell-num {
+.empty-cell {
+    background: #fafbfc !important;
     color: transparent;
 }
 
@@ -409,7 +506,7 @@ onBeforeUnmount(() => {
     justify-content: space-between;
     gap: 20px;
     flex-wrap: wrap;
-    padding-top: 6px;
+    padding-top: 4px;
     border-top: 1px solid #f0f2f5;
     font-size: 12px;
     color: #606266;
@@ -468,5 +565,11 @@ onBeforeUnmount(() => {
     margin-left: 6px;
     color: #909399;
     font-size: 12px;
+}
+
+.stat-cell {
+    background: #fdf6ec;
+    color: #e6a23c;
+    font-weight: 600;
 }
 </style>

@@ -16,6 +16,8 @@ from services.coefficient import coefficient_config as cfg_module
 from services.coefficient.data_source import build_gap_df
 from services.coefficient.predictor import CoefficientPredictor
 from utils.response import success, fail
+from utils.logger import get_logger
+logger = get_logger('api.coefficient')
 
 coefficient_bp = Blueprint("coefficient", __name__)
 
@@ -93,7 +95,7 @@ def _build_payload(result, target_date_str, window_days):
                     }
                 )
     except Exception as e:
-        print(f"[Coefficient] 构建多策略曲线失败: {e}")
+        logger.warning(f"[Coefficient] 构建多策略曲线失败: {e}")
 
     return {
         "success": True,

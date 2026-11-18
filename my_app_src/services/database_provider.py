@@ -11,12 +11,8 @@
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-
-from services import preview_store
+from services.constants import DataSource
 from services.db_store import fetch_items as db_fetch_items
-
-SOURCE_PREVIEW = "preview"
-SOURCE_DB = "database"
 
 
 def _key(rec: Dict) -> tuple:
@@ -59,25 +55,3 @@ def fetch_record(
     if not points:
         return None, "empty"
     return points, rec.get("source", SOURCE_DB)
-
-
-def fetch_from_database(
-    data_type: str,
-    sub_type: str,
-    date: str,
-    node_name: Optional[str] = None,
-) -> Optional[pd.DataFrame]:
-    """通用取数（供 data_provider 使用）
-
-    - load: 负荷（MW），保持原精度
-    - day-ahead / spread: 价格（元/MWh），保留 3 位小数
-    返回列为 time / value 的 DataFrame；无数据时返回 None。
-    """
-    points, _source = fetch_record(data_type, sub_type, date, node_name)
-    if not points:
-        return None
-
-    df = pd.DataFrame([{"time": p["time"], "value": p["value"]} for p in points])
-    if data_type in ("day-ahead", "spread"):
-        df["value"] = pd.to_numeric(df["value"], errors="coerce").round(3)
-    return df

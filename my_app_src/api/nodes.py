@@ -1,74 +1,54 @@
+# api/nodes.py
 from flask import Blueprint, request
-
-from services.node_manager import NodeManager
-from utils.response import success, fail
+from services.bid_space_service import fetch_unit_names
+from services.db_store import fetch_contract_config, save_contract_config
+from utils.response import success
+import json
 
 nodes_bp = Blueprint("nodes", __name__)
 
 
 @nodes_bp.get("/plant")
 def list_nodes():
-    return success(NodeManager.list_all())
+    """获取浙江省所有电厂节点（直接读正式库）"""
+    units = fetch_unit_names()
+    # 构造兼容原有前端的结构
+    result = [
+        {
+            "id": idx + 1,
+            "name": name,
+            "description": "正式库节点",
+            "createdAt": "",
+            "updatedAt": "",
+        }
+        for idx, name in enumerate(units)
+    ]
+    return success(result)
 
 
-@nodes_bp.post("/plant")
-def add_node():
+@nodes_bp.get("/price-compare-defaults")
+def get_price_compare_defaults():
+    """获取电价对比的默认节点配置"""
+    val = fetch_contract_config("price_compare_default_nodes")
+    if not val:
+        return success([])
+    try:
+        return success(json.loads(val))
+    except Exception:
+        return success([])
+
+
+@nodes_bp.post("/price-compare-defaults")
+def save_price_compare_defaults():
+    """保存电价对比的默认节点配置"""
     data = request.get_json(silent=True) or {}
-    res = NodeManager.add(data.get("name", ""), data.get("description", ""))
-    if not res["ok"]:
-        return fail(res["error"])
-    return success(res["node"], msg="已新增")
-
-
-@nodes_bp.put("/plant/<int:node_id>")
-def update_node(node_id: int):
-    data = request.get_json(silent=True) or {}
-    res = NodeManager.update(node_id, data.get("name", ""), data.get("description", ""))
-    if not res["ok"]:
-        return fail(res["error"])
-    return success(res["node"], msg="已修改")
-
-
-@nodes_bp.delete("/plant/<int:node_id>")
-def delete_node(node_id: int):
-    res = NodeManager.delete(node_id, purge=True)
-    if not res["ok"]:
-        return fail(res["error"])
-    return success(msg="已删除节点及其临时数据")
-
-
-@nodes_bp.post("/plant/batch")
-def add_nodes_batch():
-    """批量新增节点
-    body: { names: string[], description?: string }
-    """
-    data = request.get_json(silent=True) or {}
-    names = data.get("names") or []
-    if not isinstance(names, list) or not names:
-        return fail("请提供节点名列表")
-
-    res = NodeManager.add_batch(names, data.get("description", ""))
-    if not res.get("ok", True):
-        return fail(res.get("error", "批量新增失败"))
-
-    return success(
-        res,
-        msg=f"新增 {len(res['added'])} 个，跳过 {len(res['skipped'])} 个",
-    )
-
-
-@nodes_bp.delete("/plant/batch")
-def delete_nodes_batch():
-    """批量删除节点
-    body: { ids: number[] }
-    """
-    data = request.get_json(silent=True) or {}
-    ids = data.get("ids") or []
-    if not isinstance(ids, list) or not ids:
-        return fail("请提供要删除的节点 ID 列表")
-
-    res = NodeManager.delete_batch(ids, purge=True)
-    if not res["ok"]:
-        return fail(res["error"])
-
-    return success(res, msg=f"已删除 {res['count']} 个节点")
+    nodes = data.get("nodes", [])
+    if not isinstance(nodes, list):
+        return fail("无效的节点列表")
+    try:
+        save_contract_config(
+            "price_compare_default_nodes", json.dumps(nodes, ensure_ascii=False)
+        )
+        return success(msg="默认节点配置已保存")
+    except Exception as e:
+        return fail(f"保存失败: {e}")

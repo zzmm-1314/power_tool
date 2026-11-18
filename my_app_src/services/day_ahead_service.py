@@ -5,9 +5,18 @@
 本模块只负责从库里读取并组装成热力图 / 单日曲线。
 """
 
+from utils.cache import ttl_cache
 from typing import Dict, List, Optional
-
+from services.bid_space_service import (
+    fetch_day_ahead,
+    fetch_dates_in_month,
+    _fetch_data,
+    fetch_day_ahead_range,
+    fetch_realtime_range,
+)
+from services.bid_space_service import fetch_day_ahead_range
 from services.database_provider import fetch_series
+from datetime import datetime, timedelta
 from services.day_ahead_parser import (
     TARGET_DEVICE_UNIFIED,
     _norm_time,
@@ -15,15 +24,11 @@ from services.day_ahead_parser import (
     _time_to_slot_index,
     parse_plant_price_excel,
 )
-from services.node_manager import NodeManager
+from utils.logger import get_logger
+from services.constants import DataSource
+from services.db_store import fetch_price_range, clear_price
 
-
-class DataSource:
-    DB = "database"
-    PREVIEW = "preview"
-    EMPTY = "empty"
-
-
+logger = get_logger("services.day_ahead_service")
 HOURS = [f"{h:02d}:00" for h in range(1, 25)]  # 01:00 ~ 24:00
 
 # 48 点时间标签：00:30 / 01:00 / 01:30 / 02:00 / ... / 23:30 / 24:00
@@ -64,21 +69,102 @@ def _raw_to_hourly(raw: List[Dict]) -> List[Dict]:
     return [{"hour": f"{h + 1:02d}:00", "value": hourly_values[h]} for h in range(24)]
 
 
-def load_items(data_type: str, sub_type: str, device: Optional[str] = None) -> List[Dict]:
-    """读取某类数据（内存预览优先、数据库兜底），组装成 [{date, device, hourly, raw, source}]"""
-    records = fetch_series(data_type, sub_type, None, device)
-    items: List[Dict] = []
-    for rec in records:
-        raw = _points_to_raw(rec.get("points"))
+def load_items(
+    data_type: str,
+    sub_type: str,
+    device: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict]:
+    """日前 / 实时电价读取（range 查询，两次 DB 往返搞定）"""
+    from datetime import datetime as _dt, timedelta as _td
+
+    if data_type not in ("day-ahead", "spread"):
+        return []
+    if sub_type == "plant" and not device:
+        return []
+
+    # 默认范围：最近 31 天
+    if not start_date or not end_date:
+        today = _dt.now().strftime("%Y-%m-%d")
+        start_date = (_dt.now() - _td(days=31)).strftime("%Y-%m-%d")
+        end_date = today
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    query_unit = device if sub_type == "plant" else None
+    price_type = "day_ahead" if data_type == "day-ahead" else "realtime"
+
+    items = []
+
+    # ① 江苏库：一次范围查询
+    try:
+        if price_type == "day_ahead":
+            js_map = fetch_day_ahead_range(start_date, end_date, query_unit)
+        else:
+            js_map = fetch_realtime_range(start_date, end_date, query_unit)
+    except Exception as e:
+        logger.warning(f"[LoadItems] 江苏库范围查询失败: {e}")
+        js_map = {}
+
+    js_dates: set = set()
+    for d in sorted(js_map.keys()):
+        slots = js_map[d]
+        pts = [
+            {"time": t, "value": float(v["v2"]) if v.get("v2") is not None else None}
+            for t, v in sorted(slots.items())
+            if isinstance(v, dict) and v.get("v2") is not None
+        ]
+        if not pts:
+            continue
+        js_dates.add(d)
+        # 江苏库命中 → 清理浙江库
+        try:
+            clear_price(d, sub_type, price_type, query_unit)
+        except Exception:
+            pass
         items.append(
             {
-                "date": rec["date"],
-                "device": rec.get("device") or (device or ""),
-                "hourly": _raw_to_hourly(raw),
-                "raw": raw,
-                "source": rec.get("source") or DataSource.DB,
+                "date": d,
+                "device": device or "浙江",
+                "raw": pts,
+                "hourly": _raw_to_hourly(pts),
+                "source": "jiangsu",
             }
         )
+
+    # ② 浙江库：一次范围查询，跳过已被江苏库覆盖的日期
+    zj_rows = fetch_price_range(start_date, end_date, sub_type, price_type, query_unit)
+    zj_grouped: Dict[str, List[Dict]] = {}
+    for r in zj_rows:
+        d = r["date"]
+        if d in js_dates:
+            continue
+
+        # ⭐ 核心修复：确保 value 是纯数字
+        raw_val = r["value"]
+        if raw_val is None or raw_val == "":
+            val = None
+        else:
+            try:
+                val = float(raw_val)
+            except (TypeError, ValueError):
+                val = None
+
+        zj_grouped.setdefault(d, []).append({"time": r["time_label"], "value": val})
+
+    for d in sorted(zj_grouped.keys()):
+        pts = zj_grouped[d]
+        items.append(
+            {
+                "date": d,
+                "device": device or "浙江",
+                "raw": pts,
+                "hourly": _raw_to_hourly(pts),
+                "source": "zhejiang",
+            }
+        )
+
     return items
 
 
@@ -164,18 +250,21 @@ def _empty_day(date: str) -> Dict:
 # ============================================================
 
 
-def load_unified_items() -> List[Dict]:
-    """日前 · 统一结算点全部日期数据（供价差分析等复用）"""
-    return load_items("day-ahead", "unified", TARGET_DEVICE_UNIFIED)
+def load_unified_items(start_date=None, end_date=None) -> List[Dict]:
+    """日前 · 统一结算点全部日期数据"""
+    return load_items(
+        "day-ahead", "unified", TARGET_DEVICE_UNIFIED, start_date, end_date
+    )
 
 
+@ttl_cache(seconds=300)
 def fetch_unified_heatmap(
     end_date: Optional[str] = None,
     days: int = 14,
     start_date: Optional[str] = None,
 ) -> Dict:
     return _build_heatmap_from_items(
-        load_unified_items(), end_date, days, start_date=start_date
+        load_unified_items(start_date, end_date), end_date, days, start_date=start_date
     )
 
 
@@ -197,15 +286,15 @@ def fetch_unified_single_day(date: str) -> Dict:
 # ============================================================
 
 
-def load_node_items(node_name: str, base_subdir: str = "day-ahead/plant") -> List[Dict]:
-    """读取某电厂节点的全部日期数据
-
-    base_subdir 兼容旧调用写法："day-ahead/plant" 或 "spread/plant"
-    """
+def load_node_items(
+    node_name: str, base_subdir: str = "day-ahead/plant", start_date=None, end_date=None
+) -> List[Dict]:
     if not node_name:
         return []
     data_type, sub_type = base_subdir.split("/", 1)
-    return load_items(data_type, sub_type, node_name)
+    return load_items(
+        data_type, sub_type, node_name, start_date=start_date, end_date=end_date
+    )
 
 
 # 兼容旧名称
@@ -219,8 +308,9 @@ def _read_plant_node_excel(node_name: str) -> List[Dict]:
 
 
 def fetch_plant_nodes() -> List[str]:
-    """已录入的电厂节点列表"""
-    return NodeManager.names()
+    from services.bid_space_service import fetch_unit_names
+
+    return fetch_unit_names()
 
 
 def fetch_plant_heatmap(
@@ -260,7 +350,7 @@ def parse_plant_price_file(tmp_path: str) -> Dict[str, List[Dict]]:
     try:
         items = parse_plant_price_excel(tmp_path)
     except Exception as e:
-        print(f"[DayAheadService] 解析电厂文件失败: {e}")
+        logger.warning(f"[DayAheadService] 解析电厂文件失败: {e}")
         return {}
 
     grouped: Dict[str, List[Dict]] = {}

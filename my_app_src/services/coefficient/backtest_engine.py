@@ -12,9 +12,11 @@ from .coefficient_config import (
     HARD_CAP,
 )
 from .history_analyzer import compute_expectation_coefficient
-from .utils import progress_iterator
+from utils.logger import get_logger
 
-print(f"回测使用: WINSOR_PROB={WINSOR_PROB}, HARD_CAP={HARD_CAP}")
+logger = get_logger("services.coefficient.backtest_engine")
+
+logger.info(f"回测使用: WINSOR_PROB={WINSOR_PROB}, HARD_CAP={HARD_CAP}")
 
 
 def compute_incremental_pnl(coefficient: float, actual_gap: float) -> float:
@@ -40,7 +42,7 @@ def run_recent_backtest(
     )
     clean_df = history_df[~history_df["is_all_zero"]].copy()
     clean_df.drop(columns=["is_all_zero"], inplace=True)
-    print(f"过滤掉全0日期后剩余 {len(clean_df)} 天")
+    logger.info(f"过滤掉全0日期后剩余 {len(clean_df)} 天")
 
     dates = clean_df["date"].sort_values().unique()
     latest_date = dates[-1]
@@ -58,7 +60,7 @@ def run_recent_backtest(
         target_indices.append(target_idx)
 
     if len(target_indices) < 5:
-        print(f"回测日不足：仅 {len(target_indices)} 天")
+        logger.warning(f"回测日不足：仅 {len(target_indices)} 天")
         return None
 
     total_targets = len(target_indices)
@@ -79,11 +81,6 @@ def run_recent_backtest(
         window_start = usable_idx - window_days + 1
         window_dates = dates[window_start : usable_idx + 1]
         window_data = clean_df[clean_df["date"].isin(window_dates)].sort_values("date")
-
-        zero_mask = window_data[gap_cols].apply(
-            lambda row: np.all(np.abs(row) < 1e-6), axis=1
-        )
-        window_data = window_data[~zero_mask].copy()
 
         if len(window_data) < max(10, window_days * 0.3):
             continue

@@ -3,8 +3,15 @@
 import os
 import re
 from typing import Dict, List
+from utils.pdf_common import (
+    WATERMARK_FILTER_ENABLED,
+    detect_repeat_watermarks,
+    extract_page_tables,
+    open_pdf_source,
+)
+from utils.logger import get_logger
 
-import pdfplumber
+logger = get_logger("utils.pdf_parser")
 
 # ==================== 字段定义 ====================
 FIELDS_META = {
@@ -133,15 +140,11 @@ class StringWithCN(str):
 
 # ==================== 基础工具 ====================
 
-_settings_candidates = [
-    {"vertical_strategy": "lines", "horizontal_strategy": "lines"},
-    {"vertical_strategy": "lines", "horizontal_strategy": "text"},
-    {"vertical_strategy": "text", "horizontal_strategy": "text"},
-]
-
 
 def normalize(v):
-    return str(v or "").replace("\n", "").strip()
+    if v is None:
+        return ""
+    return str(v).replace("\n", "").strip()
 
 
 def cell_text(v):
@@ -157,25 +160,20 @@ def to_float(x):
         return 0.0
 
 
-def _extract_page_tables(page):
-    for s in _settings_candidates:
-        s = {
-            **s,
-            "snap_tolerance": 3,
-            "join_tolerance": 3,
-            "intersection_tolerance": 5,
-        }
-        tables = page.extract_tables(table_settings=s)
-        if tables:
-            return tables
-    return []
-
-
 def build_sheets(pdf_path: str) -> Dict[str, List]:
     sheets = {}
-    with pdfplumber.open(pdf_path) as pdf:
+    with open_pdf_source(pdf_path) as pdf:
+        # 一次扫描全文档，得到水印位置集合
+        repeat_positions = (
+            detect_repeat_watermarks(pdf) if WATERMARK_FILTER_ENABLED else set()
+        )
         for pno, page in enumerate(pdf.pages, start=1):
-            for tno, table in enumerate(_extract_page_tables(page), start=1):
+            tables = extract_page_tables(
+                page,
+                filter_watermark=WATERMARK_FILTER_ENABLED,
+                repeat_positions=repeat_positions,
+            )
+            for tno, table in enumerate(tables, start=1):
                 sheets[f"P{pno}_T{tno}"] = table
     return sheets
 
@@ -276,7 +274,7 @@ def extract_summary(table, data):
                 and "金额" not in n
                 and any("\u4e00" <= ch <= "\u9fa5" for ch in n)
             ):
-                m = re.match(r"^.*?分", n)
+                m = re.search(r"^.*?(?:分|角|整)", n)
                 data["settlement_fee_cn"] = m.group(0) if m else n
                 break
 
@@ -501,38 +499,14 @@ def extract_year(table, data):
 # ==================== 主入口 ====================
 
 
-def extract_data(sheets, pdf_path: str) -> Dict:
-    data = {k: "" for k in FIELDS_META.keys()}
-    for k in INTERNAL_FIELDS:
-        data[k] = ""
-
-    fname = os.path.basename(pdf_path or "")
-    m = re.search(r"(\d{4}年\d{1,2}月)", fname)
-    if m:
-        data["report_month"] = m.group(1)
-        plant = fname[: m.start()].strip("-_ ")
-        if plant:
-            data["plant_name"] = plant
-
-    for _name, table in sheets.items():
-        ttype = detect_table_type(table)
-        if ttype == "summary":
-            extract_summary(table, data)
-        elif ttype == "meter":
-            extract_meter(table, data)
-        elif ttype == "detail":
-            extract_detail(table, data)
-        elif ttype == "month":
-            extract_month(table, data)
-        elif ttype == "year":
-            extract_year(table, data)
-
-    print(
+def _finalize_data(data: dict, filename: str) -> dict:
+    """两种入口共用：日志 + 别名 + 派生字段 + StringWithCN"""
+    logger.info(
         f"[PDF] plant={data.get('plant_name')} month={data.get('report_month')} "
         f"company={data.get('company_name')} account={data.get('account_number')}"
     )
 
-    # 别名
+    # 别名（原样保留）
     data["energy_clearing_price"] = data.get("energy_clearing_plan_price", "")
     data["day_ahead_energy"] = data.get("day_ahead_energy") or data.get(
         "day_ahead_settlement_energy", ""
@@ -545,7 +519,6 @@ def extract_data(sheets, pdf_path: str) -> Dict:
     data["demand_respons_price"] = data.get("demand_response_price", "")
     data["demand_respons_fee"] = data.get("demand_response_fee", "")
 
-    # 合约市场合计
     me = (
         to_float(data["monthly_auction_energy"])
         + to_float(data["annual_auction_energy"])
@@ -561,11 +534,9 @@ def extract_data(sheets, pdf_path: str) -> Dict:
         data["contract_market_fee"] = f"{mf:.2f}"
         data["contract_market_price"] = f"{mf / me:.3f}"
 
-    # 结算均价
     if not data["settlement_price"] and data["total_settlement_price"]:
         data["settlement_price"] = data["total_settlement_price"]
 
-    # 结算电费万元
     if data["settlement_fee"]:
         try:
             data["settlement_fee_wan"] = (
@@ -574,7 +545,6 @@ def extract_data(sheets, pdf_path: str) -> Dict:
         except Exception:
             pass
 
-    # 中长期合约
     ml = data.get("energy_clearing_plan_energy", "")
     se = data.get("settlement_energy") or data.get("total_settlement_energy", "")
     if ml:
@@ -586,20 +556,70 @@ def extract_data(sheets, pdf_path: str) -> Dict:
             except Exception:
                 pass
 
-    # 现货电费（万元）
     spot = to_float(data.get("day_ahead_fee")) + to_float(data.get("real_time_fee"))
     if spot:
         data["spot_total_fee_wan"] = f"{spot / 10000:.2f}万元"
 
-    # 电量清分（万元）
     ec = to_float(data.get("energy_clearing_fee"))
     if ec:
         data["energy_clearing_total_wan"] = f"{ec / 10000:.2f}万元"
 
-    # 兼容 {{settlement_fee.cn}}
     data["settlement_fee"] = StringWithCN(
         data.get("settlement_fee", ""),
         data.get("settlement_fee_cn", ""),
     )
-
     return data
+
+
+def _init_data() -> dict:
+    data = {k: "" for k in FIELDS_META.keys()}
+    for k in INTERNAL_FIELDS:
+        if k not in data:
+            data[k] = ""
+    return data
+
+
+def _extract_from_filename(data: dict, filename: str):
+    fname = os.path.basename(filename or "")
+    m = re.search(r"(\d{4}年\d{1,2}月)", fname)
+    if m:
+        data["report_month"] = m.group(1)
+        plant = fname[: m.start()].strip("-_ ")
+        if plant:
+            data["plant_name"] = plant
+
+
+def _extract_from_table_list(tables: List[List[List[str]]], data: dict):
+    """遍历 tables（每张表是 string[][]）→ 按类型分派"""
+    for table in tables:
+        if not table:
+            continue
+        ttype = detect_table_type(table)
+        if ttype == "summary":
+            extract_summary(table, data)
+        elif ttype == "meter":
+            extract_meter(table, data)
+        elif ttype == "detail":
+            extract_detail(table, data)
+        elif ttype == "month":
+            extract_month(table, data)
+        elif ttype == "year":
+            extract_year(table, data)
+
+
+# ---------- 老路径（pdfplumber 兜底） ----------
+def extract_data(sheets: Dict[str, List], pdf_path: str) -> dict:
+    data = _init_data()
+    _extract_from_filename(data, pdf_path)
+    _extract_from_table_list(list(sheets.values()), data)
+    return _finalize_data(data, pdf_path)
+
+
+# ---------- 新路径（前端传结构化表格） ----------
+def extract_data_from_tables(tables: List[dict], filename: str) -> dict:
+    """tables 格式：[{pageIndex, rows: [[cell, ...], ...]}, ...]"""
+    data = _init_data()
+    _extract_from_filename(data, filename)
+    all_tables = [t.get("rows") or [] for t in tables]
+    _extract_from_table_list(all_tables, data)
+    return _finalize_data(data, filename)

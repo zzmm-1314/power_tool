@@ -1,139 +1,84 @@
 from flask import Blueprint, request
 from utils.response import success, fail
-from io import BytesIO
-import pandas as pd
-from datetime import datetime
-import traceback
+from services.bid_space_service import fetch_day_ahead
 
 cross_bp = Blueprint("cross_province", __name__)
 
 
-def excel_date_col_to_datetime(col):
-    if isinstance(col, (pd.Timestamp, datetime)):
-        return pd.to_datetime(col).normalize()
-    try:
-        v = float(str(col).strip())
-        return pd.to_datetime(v, unit="D", origin="1899-12-30").normalize()
-    except Exception:
-        return pd.to_datetime(col, errors="coerce").normalize()
+@cross_bp.route("/spot-analysis", methods=["GET"])
+def spot_analysis():
+    unit_name = request.args.get("node")
+    start_date = request.args.get("startDate")
+    end_date = request.args.get("endDate")
 
+    if not unit_name or not start_date or not end_date:
+        return fail("缺少参数 node / startDate / endDate")
 
-def hour_to_period(h):
-    if pd.isna(h):
-        return pd.NA
-    h = int(h)
-    return f"{h:02d}:00-{h + 1:02d}:00"
+    from services.db_store import fetch_cross_province_spot
 
+    records = fetch_cross_province_spot(unit_name, start_date, end_date)
+    if not records:
+        return success([])
 
-@cross_bp.post("/upload")
-def upload_and_process():
-    file = request.files.get("file")
-    if not file:
-        return fail("未接收到上传文件")
+    by_trade_date = {}
+    for r in records:
+        t_date = str(r["trade_date"])[:10]
+        by_trade_date.setdefault(t_date, []).append(r)
 
-    try:
-        file_bytes = file.read()
-        file_stream = BytesIO(file_bytes)
+    result = []
+    for t_date, items in by_trade_date.items():
+        day_pts = fetch_day_ahead(t_date)
+        day_map = {}
+        if day_pts:
+            day_dict = {
+                p["time"]: p["value"] for p in day_pts if p["value"] is not None
+            }
+            for h in range(24):
+                t1 = f"{h:02d}:30"
+                t2 = f"{(h+1):02d}:00" if h < 23 else "24:00"
+                v1 = day_dict.get(t1)
+                v2 = day_dict.get(t2)
 
-        # 1. 读取成交数据
-        trade = pd.read_excel(file_stream, sheet_name="成交数据", engine="openpyxl")
-        original_cols = list(trade.columns)
+                if v1 is not None and v2 is not None:
+                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = round((v1 + v2) / 2, 3)
+                elif v1 is not None:
+                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = v1
+                elif v2 is not None:
+                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = v2
 
-        pattern = r"^E(\d{2})(\d{2})(\d{2})\.(\d{2})H$"
-        ext = trade["标的代码"].astype(str).str.extract(pattern)
+        for r in items:
+            t_type = r["time_type"]
+            clear_price = day_map.get(t_type, 0.0)
 
-        date_str = (
-            "20" + ext[0].fillna("") + "-" + ext[1].fillna("") + "-" + ext[2].fillna("")
-        )
-        trade["日期"] = pd.to_datetime(date_str, errors="coerce")
+            # 1. 转换类型为 float
+            qty_val = float(r["qty"])
+            price_val = float(r["price"])
 
-        trade["小时"] = pd.to_numeric(ext[3], errors="coerce").astype("Int64")
-        trade["时间"] = trade["小时"].apply(hour_to_period)
+            # 2. 交易逻辑：购电(买方) 和 售电(卖方)
+            if r["direction"] == "购电":
+                trade_qty = -qty_val  # ⭐ 改用 qty_val
+                price_diff = price_val - clear_price  # ⭐ 改用 price_val
+            else:
+                trade_qty = qty_val  # ⭐ 改用 qty_val
+                price_diff = price_val - clear_price  # ⭐ 改用 price_val
 
-        trade["成交数量（MW）"] = pd.to_numeric(
-            trade["成交数量（MW）"], errors="coerce"
-        )
-        buy_mask = trade["成交类型"].astype(str).str.strip().eq("购电")
-        trade.loc[buy_mask, "成交数量（MW）"] = -trade.loc[
-            buy_mask, "成交数量（MW）"
-        ].abs()
+            final_diff = trade_qty * price_diff
 
-        trade["成交价（元/MWh）"] = pd.to_numeric(
-            trade["成交价（元/MWh）"], errors="coerce"
-        )
-
-        # 2. 读取日前价格
-        price = None
-        try:
-            file_stream.seek(0)
-            price = pd.read_excel(file_stream, sheet_name="日前价格", engine="openpyxl")
-        except Exception:
-            pass
-
-        if price is None or price.empty:
-            return fail(
-                "未找到日前价格数据（请确保上传的 Excel 中包含名为 '日前价格' 的 Sheet）"
+            result.append(
+                {
+                    "opDate": r["op_date"],
+                    "tradeDate": r["trade_date"],
+                    "timeType": t_type,
+                    "direction": r["direction"],
+                    "qty": qty_val,  # ⭐ 返回 float
+                    "price": price_val,  # ⭐ 返回 float
+                    "tradeQty": trade_qty,
+                    "clearPrice": clear_price,
+                    "priceDiff": round(price_diff, 3),
+                    "finalDiff": round(final_diff, 2),
+                    "tradePath": r["trade_path"],
+                }
             )
 
-        first_col = price.columns[0]
-        price = price.rename(columns={first_col: "时间"})
-        new_cols = ["时间"] + [excel_date_col_to_datetime(c) for c in price.columns[1:]]
-        price.columns = new_cols
-        price["时间"] = (
-            price["时间"].astype(str).str.replace("：", ":", regex=False).str.strip()
-        )
-
-        price_long = price.melt(
-            id_vars="时间", var_name="日期", value_name="日前价格（元/MWh）"
-        )
-        price_long["日期"] = pd.to_datetime(
-            price_long["日期"], errors="coerce"
-        ).dt.normalize()
-        price_long["日前价格（元/MWh）"] = pd.to_numeric(
-            price_long["日前价格（元/MWh）"], errors="coerce"
-        )
-        price_long = price_long.dropna(subset=["日期", "日前价格（元/MWh）"])
-
-        # 3. 匹配并计算
-        result = trade.merge(price_long, on=["日期", "时间"], how="left")
-        result["价差（元/MWh）"] = (
-            result["成交价（元/MWh）"] - result["日前价格（元/MWh）"]
-        )
-        result["价差金额（元）"] = result["价差（元/MWh）"] * result["成交数量（MW）"]
-
-        # 处理日期序列化
-        if "日期" in result.columns:
-            result["日期"] = result["日期"].dt.strftime("%Y-%m-%d")
-
-        out_cols = original_cols + [
-            "日期",
-            "时间",
-            "日前价格（元/MWh）",
-            "价差（元/MWh）",
-            "价差金额（元）",
-        ]
-        out_cols = [c for c in out_cols if c in result.columns]
-        result = result[out_cols]
-
-        # 4. 极其关键的防错：将 DataFrame 转为 JSON 兼容格式（剔除 NaN 和 numpy 专属类型）
-        # 否则 Flask 的 jsonify 会因为 NaN 报 500 错误
-        records = result.to_dict(orient="records")
-        clean_records = []
-        for rec in records:
-            clean_rec = {}
-            for k, v in rec.items():
-                if pd.isna(v):
-                    clean_rec[k] = None
-                elif isinstance(v, pd.Timestamp):
-                    clean_rec[k] = v.strftime("%Y-%m-%d")
-                else:
-                    clean_rec[k] = v
-            clean_records.append(clean_rec)
-
-        return success(clean_records)
-
-    except Exception as e:
-        # 打印详细堆栈到终端
-        traceback.print_exc()
-        # 把真实错误信息返回给前端
-        return fail(f"解析异常: {str(e)}")
+    result.sort(key=lambda x: (x["opDate"], x["tradeDate"], x["timeType"]))
+    return success(result)

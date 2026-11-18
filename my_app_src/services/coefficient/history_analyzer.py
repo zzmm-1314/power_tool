@@ -10,6 +10,9 @@ from .coefficient_config import (
     COEFF_MAX,
 )
 from .utils import progress_iterator
+from utils.logger import get_logger
+
+logger = get_logger("services.coefficient.history_analyzer")
 
 
 def clamp(values, lower, upper):
@@ -78,15 +81,12 @@ def compute_expectation_coefficient(
         }
 
     # ========== 新增：计算天数差时处理可能的 NaT ==========
-    age_series = (reference_date - dates).dt.days
-    # 将任何无效值（如 NaT）替换为 0
-    ages = age_series.fillna(0).to_numpy(dtype=float)
+    ages = (reference_date - dates).dt.days.to_numpy(dtype=float)
     ages = np.maximum(ages, 0)
 
     weights = np.power(0.5, ages / half_life)
-
-    # ========== 新增：检查 weights 是否全为 nan 或 0 ==========
-    if np.all(np.isnan(weights)) or np.sum(weights) == 0:
+    weight_sum = weights.sum()
+    if np.isnan(weight_sum) or weight_sum == 0:
         return {
             "sample_days": int(len(values)),
             "effective_sample_size": 0.0,
@@ -96,8 +96,7 @@ def compute_expectation_coefficient(
             "negative_risk": 0.0,
             "coefficient": 1.0,
         }
-
-    weights = weights / weights.sum()
+    weights = weights / weight_sum
     if len(values) == 0:
         return {
             "sample_days": 0,
@@ -127,7 +126,7 @@ def compute_expectation_coefficient(
     total_signal = positive_gain + negative_risk
     coefficient = 2 * positive_gain / total_signal if total_signal > 0 else 1.0
     if abs(positive_gain) < 1e-6 and abs(negative_risk) < 1e-6:
-        print(f"警告: 正收益和负风险均为0，系数设为1.0")
+        logger.warning(f"警告: 正收益和负风险均为0，系数设为1.0")
     # 额外指标
     non_zero_mask = adjusted_values != 0
     non_zero_weight = float(np.sum(weights[non_zero_mask]))

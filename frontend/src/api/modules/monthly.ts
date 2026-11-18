@@ -30,7 +30,7 @@ export function uploadMonthlyTemplate(file: File) {
 }
 
 export function deleteMonthlyTemplate(name: string) {
-    return request<void>({
+    return request<null>({
         url: `/monthly/templates/${encodeURIComponent(name)}`,
         method: 'delete',
     })
@@ -45,7 +45,6 @@ export function parseMonthlyPdf(file: File) {
         data: fd,
     })
 }
-
 export interface GenerateResult {
     filename: string
     base64: string

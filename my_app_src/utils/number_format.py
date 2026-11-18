@@ -6,12 +6,6 @@ def apply_number_format_v2(ws):
     two_dec_cols = [4, 8, 13, 18, 23]
     for row in range(5, 53):
         for col in three_dec_cols:
-            try:
-                ws.cell(row=row, column=col).number_format = "0.000"
-            except Exception:
-                pass
+            ws.cell(row=row, column=col).number_format = "0.000"
         for col in two_dec_cols:
-            try:
-                ws.cell(row=row, column=col).number_format = "0.00"
-            except Exception:
-                pass
+            ws.cell(row=row, column=col).number_format = "0.00"

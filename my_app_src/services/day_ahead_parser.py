@@ -3,8 +3,11 @@
 import os
 import re
 from typing import List, Dict, Optional
-
+from utils.dates import extract_date_from_filename, extract_date_from_text
 import pandas as pd
+from utils.logger import get_logger
+
+logger = get_logger("services.day_ahead_parser")
 
 TARGET_DEVICE_UNIFIED = "浙江"
 TARGET_DEVICE_REAL_TIME = "浙江电力"
@@ -24,33 +27,6 @@ def _slot_to_time(slot: int) -> str:
 
 
 ALL_SLOT_TIMES = [_slot_to_time(i) for i in range(48)]
-
-
-def extract_date_from_text(text) -> Optional[str]:
-    if text is None:
-        return None
-    m = _DATE_PATTERN.search(str(text))
-    if not m:
-        return None
-    y, mo, d = m.groups()
-    try:
-        return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
-    except ValueError:
-        return None
-
-
-def extract_date_from_filename(filename: str) -> Optional[str]:
-    if not filename:
-        return None
-    base = os.path.basename(filename)
-    m = re.search(r"(\d{4})(\d{2})(\d{2})", base)
-    if m:
-        y, mo, d = m.groups()
-        try:
-            return f"{y}-{int(mo):02d}-{int(d):02d}"
-        except ValueError:
-            pass
-    return extract_date_from_text(base)
 
 
 def _norm_time(t) -> str:
@@ -131,7 +107,7 @@ def parse_price_excel(
     try:
         df = pd.read_excel(file_path, header=None, dtype=object)
     except Exception as e:
-        print(f"[PriceParser] 读取 {file_path} 失败: {e}")
+        logger.warning(f"[PriceParser] 读取 {file_path} 失败: {e}")
         return []
 
     if df.empty or len(df) < 2 or len(df.columns) <= 2:

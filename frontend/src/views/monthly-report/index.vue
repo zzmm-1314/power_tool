@@ -206,7 +206,7 @@ async function parsePdf() {
     try {
         const res = await parseMonthlyPdf(pdfFile.value)
         previewFields.value = res.fields
-        msg.value = `解析完成，共识别 ${res.fields.filter((f) => f.value).length} 个字段`
+        msg.value = `解析完成，共识别 ${res.fields.filter(f => f.value).length} 个字段`
         msgType.value = 'ok'
     } catch (e) {
         msg.value = (e as Error).message || '解析失败'

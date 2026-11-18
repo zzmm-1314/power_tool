@@ -6,14 +6,8 @@
 from typing import Optional, Tuple
 
 import pandas as pd
-
+from services.constants import DataSource
 from services.database_provider import fetch_record
-
-
-class DataSource:
-    DB = "database"
-    PREVIEW = "preview"
-    EMPTY = "empty"
 
 
 def fetch_data(

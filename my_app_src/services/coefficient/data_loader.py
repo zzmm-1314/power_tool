@@ -2,6 +2,9 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from utils.logger import get_logger
+
+logger = get_logger("services.coefficient.data_loader")
 
 
 def load_history_data(file_path, date_col=None):
@@ -26,9 +29,9 @@ def load_history_data(file_path, date_col=None):
     # 3. 提取时段列（除日期列之外的所有列）
     period_cols = [col for col in df.columns if col != date_col]
     if len(period_cols) != 48:
-        # 如果列数不是48，尝试检查是否有 '0'..'47' 命名的列
-        # 但为了容错，我们直接取所有其他列，并强制重命名
-        print(f"警告：时段列数为 {len(period_cols)}，期望48列。将按顺序重命名。")
+        raise ValueError(
+            f"时段列数为 {len(period_cols)}，期望 48 列。请检查「{file_path}」中的列是否完整。"
+        )
 
     # 4. 构建时段数据，并强制重命名为 '0'...'47'
     gap_data = df[period_cols].copy()
@@ -38,27 +41,3 @@ def load_history_data(file_path, date_col=None):
     result = pd.DataFrame({"date": dates})
     result = pd.concat([result, gap_data], axis=1)
     return result
-
-
-def prepare_weather_data(weather_df, target_date):
-    """
-    准备天气数据：从包含多日的DataFrame中提取目标日期，并上采样至48点
-    weather_df : 包含 'time' (datetime) 和气象字段的DataFrame
-    target_date : str or datetime, 预测日期
-    返回48行DataFrame
-    """
-    target = pd.to_datetime(target_date).date()
-    day_df = weather_df[weather_df["time"].dt.date == target].copy()
-    if len(day_df) != 24:
-        raise ValueError(f"目标日期 {target} 数据行数 {len(day_df)}，期望24行")
-    day_df = day_df.sort_values("time").reset_index(drop=True)
-    # 上采样至48点（简单复制）
-    df_48 = pd.DataFrame()
-    for col in day_df.columns:
-        if col == "time":
-            # 生成48个时间点
-            times = pd.date_range(start=f"{target} 00:00", periods=48, freq="30min")
-            df_48["time"] = times
-        else:
-            df_48[col] = np.repeat(day_df[col].values, 2)
-    return df_48

@@ -21,7 +21,9 @@ defineProps<{ title?: string }>()
 .page-container {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
+    /* 间距稍微拉大，更有呼吸感 */
+    padding-bottom: 20px;
 }
 
 .page-header {
@@ -29,19 +31,22 @@ defineProps<{ title?: string }>()
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 16px 20px;
+    /* 增加内边距 */
     background: #fff;
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    border-radius: 8px;
+    /* 从 6px 提升到 8px */
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
+    /* 更柔和的阴影 */
     flex-wrap: wrap;
-    /* ← 标题 + extra 整体可换行 */
 }
 
 .page-title {
     margin: 0;
-    font-size: 16px;
+    font-size: 17px;
+    /* 字体稍微加大 */
     font-weight: 600;
-    flex-shrink: 0;
+    color: #1f2d3d;
 }
 
 .page-extra {
@@ -59,24 +64,7 @@ defineProps<{ title?: string }>()
 .page-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-}
-
-/* #extra 内统一按钮样式 */
-:deep(.btn-upload) {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 30px;
-    padding: 0 14px;
-    border: 1px solid #2d6cdf;
-    border-radius: 4px;
-    background: #fff;
-    color: #2d6cdf;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-    white-space: nowrap;
+    gap: 16px;
 }
 
 :deep(.btn-upload:hover) {

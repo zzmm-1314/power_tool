@@ -63,34 +63,30 @@ const menus: MenuItem[] = [
             { title: '合约分解', path: '/contract/decomposition' },
             { title: '电厂合约仓位', path: '/contract/position' },
             { title: '滚撮收益模拟', path: '/contract/rolling-profit' },
-            { title: '长三角省间交易收益模拟', path: '/contract/cross-province-profit' }, // 新增
+            { title: '长三角省间交易收益模拟', path: '/contract/cross-province-profit' },
+            { title: '合约配置', path: '/contract/config' },
         ],
     },
     {
-        title: '结算单更新',
+        title: '结算单查询与下载',
         children: [
+            { title: "电价对比", path: '/settlement/price-compare' },
             { title: '实际结算单更新', path: '/settlement/actual' },
-            { title: '椒江模拟结算单更新', path: '/settlement/jiaojiang' },
-            { title: '通用模拟结算单更新', path: '/settlement/general' },
         ],
     },
-    { title: '申报系数预测', path: '/coefficient' },
-    { title: '滚撮分析', path: '/rolling' },
+    // ⭐ 工具助手新增了原本的结算单更新子项及申报系数预测
     {
-        title: '月报与数据提取',
+        title: '工具助手',
         children: [
             { title: '月报数据部分填充', path: '/monthly-report' },
-            { title: '结算单 PDF 提取', path: '/monthly-extract' }, // 新增
+            { title: '结算单 PDF 提取', path: '/monthly-extract' },
+            { title: '文档逐字比对', path: '/tools/doc-compare' },
+            { title: '模拟结算单更新', path: '/settlement/simulate' },
+            { title: '申报系数预测', path: '/coefficient' },
         ],
     },
+    { title: '滚撮分析', path: '/rolling' },
     { title: '统调电厂', path: '/unified-plants' },
-    {
-        title: '设置',
-        children: [
-            { title: '节点编辑', path: '/node-edit' },
-            { title: '中长期合约配置', path: '/settings/contract-config' }, // 新增
-        ],
-    },
 
 ]
 
@@ -106,10 +102,12 @@ function toggle(idx: number) {
 
 <style scoped>
 .app-sidebar {
-    width: 200px;
+    width: 210px;
+    /* 稍微加宽一点点 */
     background: #fff;
-    border-right: 1px solid #e4e7ed;
-    transition: width 0.2s;
+    border-right: 1px solid #ebeef5;
+    transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 1px 0 8px rgba(0, 0, 0, 0.02);
 }
 
 .app-sidebar.collapsed {
@@ -119,39 +117,44 @@ function toggle(idx: number) {
 }
 
 .menu {
-    padding: 8px 0;
+    padding: 12px 8px;
 }
 
 .menu-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 18px;
-    color: #303133;
+    padding: 9px 14px;
+    margin-bottom: 3px;
+    color: #4a5568;
     font-size: 14px;
     text-decoration: none;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    border-radius: var(--radius-sm);
+    transition: background 0.2s ease, color 0.2s ease;
 }
 
 .menu-item:hover {
-    background: #f0f5ff;
-    color: #2d6cdf;
+    background: var(--bg-subtle);
+    color: var(--text-1);
 }
 
+/* 统一激活态：左侧高亮竖条 + 浅色底（原先两段 .menu-item.active 相互覆盖，已合并） */
 .menu-item.active {
-    background: #ecf3ff;
-    color: #2d6cdf;
-    font-weight: 500;
-    border-right: 3px solid #2d6cdf;
+    background: var(--primary-light);
+    color: var(--primary);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 0 var(--primary);
 }
 
 .group-title {
     font-weight: 500;
+    color: var(--text-2);
 }
 
 .arrow {
     font-size: 12px;
+    color: var(--text-4);
     transition: transform 0.2s;
     transform: rotate(-90deg);
 }
@@ -161,12 +164,20 @@ function toggle(idx: number) {
 }
 
 .submenu {
-    background: #fafbfc;
+    margin-top: -3px;
+    margin-bottom: 8px;
 }
 
 .sub-item {
-    padding-left: 34px;
+    padding-left: 32px;
     font-size: 13px;
-    color: #5a6472;
+    color: var(--text-3);
+}
+
+.sub-item.active {
+    color: var(--primary);
+    font-weight: 500;
+    background: transparent;
+    box-shadow: inset 2px 0 0 0 var(--primary);
 }
 </style>

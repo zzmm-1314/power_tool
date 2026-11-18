@@ -17,14 +17,13 @@
 
                 <template v-if="form.nodeType === 'plant'">
                     <label class="inline-label">节点</label>
-                    <select v-model="form.nodeName" class="input" style="min-width: 200px">
-                        <option value="">请选择节点</option>
-                        <option v-for="n in nodes" :key="n" :value="n">{{ n }}</option>
-                    </select>
+                    <!-- ⭐ 修复：去掉 @change="loadNodes" -->
+                    <SearchableSelect v-model="form.nodeName" :options="nodes" style="width: 220px;" />
                 </template>
 
                 <label class="inline-label">预测日期</label>
-                <input v-model="form.targetDate" type="date" class="input" />
+                <el-date-picker v-model="form.targetDate" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD"
+                    style="width: 140px;" />
 
                 <label class="inline-label">回看窗口</label>
                 <input v-model.number="form.windowDays" type="number" min="15" max="120" class="input small" />
@@ -57,127 +56,138 @@
         </div>
 
         <!-- ===== 结果区：左右分栏 ===== -->
-        <div v-if="result" class="result-layout">
-            <!-- 左侧目录 -->
-            <aside class="result-aside">
-                <div v-for="item in TOC_ITEMS" :key="item.key" class="toc-item"
-                    :class="{ active: activeKey === item.key, disabled: !item.enabled }"
-                    @click="item.enabled && (activeKey = item.key)">
-                    {{ item.label }}
-                </div>
-            </aside>
+        <!-- ⭐ 无论有没有结果，都给一个 wrapper 挂载 loading -->
+        <div class="result-wrapper">
+            <!-- ⭐ 引入 LoadingMask -->
+            <LoadingMask
+                :visible="!!(starting || (taskProgress && taskProgress.stage && taskProgress.stage !== '完成' && taskProgress.stage !== '报错'))"
+                text="模型计算中，请稍候...（可能需要几十秒）" />
 
-            <!-- 右侧图表 -->
-            <section class="result-main">
-                <!-- 摘要 -->
-                <div class="summary-bar">
-                    <span>策略：<strong>{{ result.strategy }}</strong></span>
-                    <span>半衰期：<strong>{{ result.half_life }} 天</strong></span>
-                    <span>预测日期：<strong>{{ result.target_date }}</strong></span>
-                    <span>系数范围：{{ result.coeff_min }} ~ {{ result.coeff_max }}</span>
-                </div>
+            <div v-if="result" class="result-layout">
+                <!-- 左侧目录 -->
+                <aside class="result-aside">
+                    <div v-for="item in TOC_ITEMS" :key="item.key" class="toc-item"
+                        :class="{ active: activeKey === item.key, disabled: !item.enabled }"
+                        @click="item.enabled && (activeKey = item.key)">
+                        {{ item.label }}
+                    </div>
+                </aside>
 
-                <!-- 1. 修正前多策略曲线 -->
-                <!-- 1. 修正前多策略曲线 -->
-                <div v-if="activeKey === 'base'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">修正前系数曲线（所有策略 × 半衰期）</span>
-                        <button class="btn ghost small" @click="exportMultiStrategyCsv">
-                            导出多策略 CSV
-                        </button>
+                <!-- 右侧图表 -->
+                <section class="result-main">
+                    <!-- 摘要 -->
+                    <div class="summary-bar">
+                        <span>策略：<strong>{{ result.strategy }}</strong></span>
+                        <span>半衰期：<strong>{{ result.half_life }} 天</strong></span>
+                        <span>预测日期：<strong>{{ result.target_date }}</strong></span>
+                        <span>系数范围：{{ result.coeff_min }} ~ {{ result.coeff_max }}</span>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="multiStrategyOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 2. 修正后系数 -->
-                <div v-if="activeKey === 'final'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">修正后系数曲线（本次选中策略）</span>
-                        <button class="btn ghost small" @click="exportCsv">导出 CSV</button>
+                    <!-- 1. 修正前多策略曲线 -->
+                    <div v-if="activeKey === 'base'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">修正前系数曲线（所有策略 × 半衰期）</span>
+                            <button class="btn ghost small" @click="exportMultiStrategyCsv">
+                                导出多策略 CSV
+                            </button>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="multiStrategyOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="finalCurveOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 3. 修正前后对比 -->
-                <div v-if="activeKey === 'compare'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">修正前后对比</span>
+                    <!-- 2. 修正后系数 -->
+                    <div v-if="activeKey === 'final'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">修正后系数曲线（本次选中策略）</span>
+                            <button class="btn ghost small" @click="exportCsv">导出 CSV</button>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="finalCurveOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="beforeAfterOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 4. 天气-气温云量 -->
-                <div v-if="activeKey === 'weather-temp'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">气温与云量（面积图）</span>
+                    <!-- 3. 修正前后对比 -->
+                    <div v-if="activeKey === 'compare'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">修正前后对比</span>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="beforeAfterOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="tempCloudOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 5. 天气-风速湿度 -->
-                <div v-if="activeKey === 'weather-wind'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">风速与湿度（面积图）</span>
+                    <!-- 4. 天气-气温云量 -->
+                    <div v-if="activeKey === 'weather-temp'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">气温与云量（面积图）</span>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="tempCloudOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="windHumidityOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 6. 天气-辐射 -->
-                <div v-if="activeKey === 'weather-rad'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">直接辐射与散射辐射（面积图）</span>
+                    <!-- 5. 天气-风速湿度 -->
+                    <div v-if="activeKey === 'weather-wind'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">风速与湿度（面积图）</span>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="windHumidityOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="radiationOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 7. 修正明细 -->
-                <div v-if="activeKey === 'detail'" class="chart-card">
-                    <div class="chart-header">
-                        <span class="chart-title">修正明细（各偏移分量堆叠）</span>
+                    <!-- 6. 天气-辐射 -->
+                    <div v-if="activeKey === 'weather-rad'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">直接辐射与散射辐射（面积图）</span>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="radiationOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="chart-body">
-                        <VChart :option="correctionDetailOption" autoresize class="chart" />
-                    </div>
-                </div>
 
-                <!-- 8. 系数表格 -->
-                <div v-if="activeKey === 'table'" class="table-card">
-                    <div class="chart-header">
-                        <span class="chart-title">48 点系数明细</span>
-                        <button class="btn ghost small" @click="exportCsv">导出 CSV</button>
+                    <!-- 7. 修正明细 -->
+                    <div v-if="activeKey === 'detail'" class="chart-card">
+                        <div class="chart-header">
+                            <span class="chart-title">修正明细（各偏移分量堆叠）</span>
+                        </div>
+                        <div class="chart-body">
+                            <VChart :option="correctionDetailOption" autoresize class="chart" />
+                        </div>
                     </div>
-                    <div class="table-wrap scroll-y">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>时段</th>
-                                    <th>修正前</th>
-                                    <th>修正后</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="(h, i) in result.hours" :key="i">
-                                    <td>{{ h }}</td>
-                                    <td>{{ result.base_coefficients[i]?.toFixed(4) }}</td>
-                                    <td>{{ result.coefficients[i]?.toFixed(4) }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
+
+                    <!-- 8. 系数表格 -->
+                    <div v-if="activeKey === 'table'" class="table-card">
+                        <div class="chart-header">
+                            <span class="chart-title">48 点系数明细</span>
+                            <button class="btn ghost small" @click="exportCsv">导出 CSV</button>
+                        </div>
+                        <div class="table-wrap scroll-y">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>时段</th>
+                                        <th>修正前</th>
+                                        <th>修正后</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(h, i) in result.hours" :key="i">
+                                        <td>{{ h }}</td>
+                                        <td>{{ result.base_coefficients[i]?.toFixed(4) }}</td>
+                                        <td>{{ result.coefficients[i]?.toFixed(4) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            </div>
+
+            <!-- ⭐ 如果没有结果且正在计算，给个占位符撑开高度 -->
+            <div v-else-if="starting || (taskProgress && taskProgress.stage !== '完成')"
+                class="empty-loading-placeholder"></div>
         </div>
 
         <!-- 天气参数配置弹窗 -->
@@ -191,6 +201,7 @@ import type { EChartsOption } from 'echarts'
 import VChart from 'vue-echarts'
 import PageContainer from '@/components/PageContainer.vue'
 import WeatherConfigModal from '@/components/WeatherConfigModal.vue'
+import LoadingMask from '@/components/LoadingMask.vue'
 import {
     startCoefficientTask,
     fetchCoefficientProgress,
@@ -198,7 +209,7 @@ import {
     type ProgressData,
 } from '@/api/modules/coefficient'
 import { listPlantNodes } from '@/api/modules/nodes'
-
+import SearchableSelect from '@/components/SearchableSelect.vue'
 /* ---------------- 表单 ---------------- */
 const form = reactive({
     nodeType: 'unified',
@@ -246,7 +257,6 @@ const activeKey = ref<string>('base')
 watch(hasWeather, (v) => {
     if (!v && activeKey.value.startsWith('weather')) activeKey.value = 'base'
 })
-
 /* ---------------- 加载节点 ---------------- */
 async function loadNodes() {
     try {
@@ -764,6 +774,19 @@ function exportCsv() {
 }
 
 /* ===== 结果区左右分栏 ===== */
+/* 给结果容器增加相对定位，确保 LoadingMask 覆盖 */
+.result-wrapper {
+    position: relative;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 占位符高度，防止在首次计算时容器高度塌陷 */
+.empty-loading-placeholder {
+    min-height: 480px;
+}
+
 .result-layout {
     display: flex;
     gap: 12px;

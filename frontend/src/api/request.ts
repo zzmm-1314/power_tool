@@ -7,9 +7,11 @@ const service: AxiosInstance = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
     timeout: 30000,
 })
-
 service.interceptors.response.use(
     (response): any => {
+        if (response.config.responseType === 'blob') {
+            return response
+        }
         const res = response.data as ApiResult
         if (res.code !== 0) {
             return Promise.reject(new Error(res.msg || '请求失败'))

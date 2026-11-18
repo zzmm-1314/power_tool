@@ -26,6 +26,9 @@ from .history_analyzer import (
 )
 from .weather_processor import calculate_weather_components, calculate_gen_risk_offset
 from .backtest_engine import run_recent_backtest
+from utils.logger import get_logger
+
+logger = get_logger("services.coefficient.predictor")
 
 
 class CoefficientPredictor:
@@ -134,13 +137,13 @@ class CoefficientPredictor:
                 best = select_best_strategy(backtest_df)
                 strategy_family = best["strategy_family"]
                 half_life = best["half_life"]
-                print(
+                logger.info(
                     f"自动选择策略: {strategy_family}, 半衰期: {half_life}天, 回测累计PnL: {best['cumulative_pnl']:.2f}元"
                 )
             else:
                 strategy_family = strategy_family or "Strategy A"
                 half_life = half_life or 7
-                print("回测无数据，使用默认策略: Strategy A, 半衰期7天")
+                logger.info("回测无数据，使用默认策略: Strategy A, 半衰期7天")
 
         self.backtest_df = backtest_df
 
@@ -231,8 +234,6 @@ class CoefficientPredictor:
                     + extreme_offset
                     + ml_offset
                 )
-                clip_min = coeff_min if coeff_min is not None else COEFF_MIN
-                clip_max = coeff_max if coeff_max is not None else COEFF_MAX
                 final = np.clip(final, clip_min, clip_max)
 
                 correction_log.append(

@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/contract/CrossProvinceProfit.vue'),
         meta: { title: '中长期合约 / 长三角省间交易收益模拟' },
       },
+      {
+        path: 'settlement/price-compare',
+        name: 'PriceCompare',
+        component: () => import('@/views/settlement/PriceCompare.vue'),
+        meta: { title: '电价对比' },
+      },
       // 结算单更新
       {
         path: 'settlement/actual',
@@ -76,37 +82,35 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '结算单更新 / 实际结算单更新' },
       },
       {
-        path: 'settlement/jiaojiang',
-        name: 'SettlementJiaojiang',
-        component: () => import('@/views/settlement/JiaojiangSim.vue'),
-        meta: { title: '结算单更新 / 椒江模拟结算单更新' },
+        path: 'settlement/simulate',
+        name: 'SettlementSimulate',
+        component: () => import('@/views/settlement/SimulationSim.vue'),
+        meta: { title: '结算单更新 / 模拟结算单' },
       },
       {
-        path: 'settlement/general',
-        name: 'SettlementGeneral',
-        component: () => import('@/views/settlement/generalSim.vue'),
-        meta: { title: '结算单更新 / 通用模拟结算单更新' },
+        path: 'monthly-report',
+        name: 'MonthlyReport',
+        component: () => import('@/views/monthly-report/index.vue'),
+        meta: { title: '月报数据部分填充' },
       },
-
       {
         path: 'monthly-extract',
         name: 'MonthlyExtract',
         component: () => import('@/views/monthly-report/PdfExtract.vue'),
         meta: { title: '结算单 PDF 数据提取' },
       },
-
-
+      // 工具助手
       {
-        path: 'node-edit',
-        name: 'NodeEdit',
-        component: () => import('@/views/node-edit/index.vue'),
-        meta: { title: '节点编辑' },
+        path: 'tools/doc-compare',
+        name: 'DocCompare',
+        component: () => import('@/views/tools/DocCompare.vue'),
+        meta: { title: '工具助手 / 文档逐字比对' },
       },
       {
-        path: 'settings/contract-config',
+        path: 'contract/config', // 原来是 settings/contract-config
         name: 'ContractConfig',
-        component: () => import('@/views/settings/ContractConfig.vue'),
-        meta: { title: '设置 / 中长期合约配置' },
+        component: () => import('@/views/settings/ContractConfig.vue'), // 可以移动文件位置
+        meta: { title: '中长期合约 / 合约配置' },
       },
       {
         path: 'unified-plants',

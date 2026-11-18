@@ -1,6 +1,6 @@
 import { request } from '../request'
 
-export type SettlementTaskType = 'actual' | 'jiaojiang' | 'general'
+export type SettlementTaskType = 'actual' | 'simulate' | 'jiaojiang' | 'general'
 
 export interface TaskProgress {
     current: number
@@ -90,6 +90,67 @@ export interface BuildPriceFileResult {
 export function buildPriceFile(payload: BuildPriceFilePayload) {
     return request<BuildPriceFileResult>({
         url: '/settlement/build-price-file',
+        method: 'post',
+        data: payload,
+    })
+}
+
+export interface ActualRecord {
+    date: string
+    online_qty: number | null
+    total_fee: number | null
+    da_qty: number | null; da_price: number | null; da_fee: number | null
+    rt_qty: number | null; rt_price: number | null; rt_fee: number | null
+    cs_qty: number | null; cs_price: number | null; cs_fee: number | null
+    year_qty: number | null; year_price: number | null; year_fee: number | null
+    month_qty: number | null; month_price: number | null; month_fee: number | null
+    intraday_qty: number | null; intraday_price: number | null; intraday_fee: number | null
+}
+
+export function uploadActualSettlement(nodeName: string, files: File[]) {
+    const fd = new FormData()
+    fd.append('node_name', nodeName)
+    files.forEach(f => fd.append('files', f))
+    return request<{ msg: string }>({
+        url: '/settlement/actual/upload',
+        method: 'post',
+        data: fd,
+        timeout: 2 * 60 * 1000,
+    })
+}
+
+export function fetchActualRecords(nodeName: string) {
+    return request<ActualRecord[]>({
+        url: '/settlement/actual/records',
+        method: 'get',
+        params: { node_name: nodeName },
+    })
+}
+
+export function queryActualComparison(params: {
+    month: string
+    nodes: string[]   // 逗号拼接在后端完成还是前端完成？
+    compensation?: number
+}) {
+    return request<any[]>({
+        url: '/settlement/actual/query',
+        method: 'get',
+        params: {
+            month: params.month,
+            nodes: params.nodes.join(','),
+            compensation: params.compensation,
+        },
+    })
+}
+
+export function saveOfficialPrice(payload: {
+    node: string
+    month: string
+    officialPrice?: number | null
+    diffAmount?: number | null
+}) {
+    return request<{ msg: string }>({
+        url: '/settlement/actual/save-official',
         method: 'post',
         data: payload,
     })

@@ -12,6 +12,24 @@ from services.pdf_extract_service import extract_pdf_data, _parse_month
 monthly_bp = Blueprint("monthly", __name__)
 
 
+def _extract_tables_from_request(req) -> tuple[list | None, str]:
+    """从请求中取 tables 和 filename。返回 (tables_or_None, filename)"""
+    # JSON body（新前端推荐）
+    if req.is_json:
+        payload = req.get_json(silent=True) or {}
+        return payload.get("tables"), payload.get("filename", "")
+
+    # multipart form（兼容：tables 以字符串字段传）
+    tables_str = req.form.get("tables")
+    if tables_str:
+        try:
+            return json.loads(tables_str), req.form.get("filename", "")
+        except json.JSONDecodeError:
+            return None, ""
+
+    return None, ""
+
+
 # ==================== 模板管理 ====================
 
 
@@ -42,18 +60,28 @@ def delete_template(name: str):
 
 @monthly_bp.post("/parse")
 def parse_pdf():
-    """上传 PDF，返回字段预览"""
+    tables, filename = _extract_tables_from_request(request)
+
+    # === 新路径：前端传结构化表格 ===
+    if tables is not None:
+        if not filename:
+            f = request.files.get("file")
+            filename = f.filename if f else "unknown.pdf"
+        res = monthly_service.parse_pdf_preview_from_tables(tables, filename)
+        if not res["ok"]:
+            return fail(res["error"])
+        return success({"fields": res["fields"], "raw": res["raw"]})
+
+    # === 老路径：上传文件 ===
     file = request.files.get("file")
     if file is None or not file.filename:
         return fail("未选择 PDF 文件")
     if not file.filename.lower().endswith(".pdf"):
         return fail("仅支持 .pdf 文件")
-
     pdf_bytes = file.read()
     res = monthly_service.parse_pdf_preview(pdf_bytes, file.filename)
     if not res["ok"]:
         return fail(res["error"])
-
     return success({"fields": res["fields"], "raw": res["raw"]})
 
 
@@ -62,19 +90,32 @@ def parse_pdf():
 
 @monthly_bp.post("/generate")
 def generate():
-    """上传 PDF + 模板名，返回 base64 docx"""
-    file = request.files.get("file")
-    template_name = (request.form.get("templateName") or "").strip()
+    tables, filename = _extract_tables_from_request(request)
+    template_name = (
+        request.form.get("templateName")
+        or (request.json.get("templateName") if request.is_json else "")
+        or ""
+    ).strip()
 
-    if file is None or not file.filename:
-        return fail("未选择 PDF 文件")
-    if not file.filename.lower().endswith(".pdf"):
-        return fail("仅支持 .pdf 文件")
     if not template_name:
         return fail("未选择模板")
 
-    pdf_bytes = file.read()
-    res = monthly_service.render_docx(template_name, pdf_bytes, file.filename)
+    # === 新路径 ===
+    if tables is not None:
+        if not filename:
+            f = request.files.get("file")
+            filename = f.filename if f else "unknown.pdf"
+        res = monthly_service.render_docx_from_tables(template_name, tables, filename)
+    else:
+        # === 老路径 ===
+        file = request.files.get("file")
+        if file is None or not file.filename:
+            return fail("未选择 PDF 文件")
+        if not file.filename.lower().endswith(".pdf"):
+            return fail("仅支持 .pdf 文件")
+        pdf_bytes = file.read()
+        res = monthly_service.render_docx(template_name, pdf_bytes, file.filename)
+
     if not res["ok"]:
         return fail(res["error"])
 
@@ -95,36 +136,27 @@ def extract_pdf():
         files = request.files.getlist("files")
         fields_str = request.form.get("fields", "{}")
         fields = json.loads(fields_str)
-
         if not files:
             return fail("未接收到文件")
 
         results = []
         for f in files:
-            filename = f.filename
-            month = _parse_month(filename)
-            rec = {
-                "filename": filename,
-                "month": month,
-                "status": "success",
-            }
+            fname = f.filename
+            month = _parse_month(fname)
+            rec = {"filename": fname, "month": month, "status": "success"}
             try:
                 file_bytes = f.read()
                 data = extract_pdf_data(file_bytes, fields)
-                # 用提取到的值覆盖空字典
                 rec.update(data)
                 if not data:
                     rec["status"] = "failed"
             except Exception as e:
                 rec["status"] = "failed"
                 rec["msg"] = str(e)
-
             results.append(rec)
 
-        # 按月份排序
         results.sort(key=lambda x: x["month"])
         return success(results)
-
     except Exception as e:
         return fail(str(e))
 

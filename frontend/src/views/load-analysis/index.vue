@@ -18,17 +18,23 @@
                 @update:end="dateEnd = $event" />
             <button class="btn" @click="load">查询</button>
         </template>
+        <!-- ⭐ 用相对定位的 wrapper 包住内容区 -->
+        <div class="content-wrapper">
+            <!-- ⭐ 加入 Loading 遮罩 -->
+            <LoadingMask :visible="loading" text="正在查询数据..." />
 
-        <ChartPanel :title="tab === 'load'
-            ? '96 点负荷曲线（浙江电网）'
-            : '96 点光伏出力曲线（浙江电网）'" :option="chartOption" :loading="loading" height="480px" />
+            <ChartPanel :title="tab === 'load'
+                ? '96 点负荷曲线（浙江电网）'
+                : '96 点光伏出力曲线（浙江电网）'" :option="chartOption" :loading="loading" height="480px" />
 
-        <!-- 差值图例：负荷 / 光伏都可能有 -->
-        <div v-if="diffData" class="legend-tip">
-            <span class="dot positive"></span> 预测 &gt; 实际
-            <span class="dot negative"></span> 预测 &lt; 实际
-            <span class="tip-text">（条形图为次坐标轴：预测 − 实际，单位 MW）</span>
+            <!-- 差值图例：负荷 / 光伏都可能有 -->
+            <div v-if="diffData" class="legend-tip">
+                <span class="dot positive"></span> 预测 &gt; 实际
+                <span class="dot negative"></span> 预测 &lt; 实际
+                <span class="tip-text">（条形图为次坐标轴：预测 − 实际，单位 MW）</span>
+            </div>
         </div>
+
     </PageContainer>
 </template>
 
@@ -46,7 +52,7 @@ import DateRangeInput from '@/components/DateRangeInput.vue'
 import { fetchLoadAnalysis, fetchPvAnalysis } from '@/api/modules/load'
 import type { DataSource, LoadSeries } from '@/types'
 import { useAppStore } from '@/stores/app'
-
+import LoadingMask from '@/components/LoadingMask.vue'
 type TabKey = 'load' | 'pv'
 
 const appStore = useAppStore()
@@ -237,11 +243,6 @@ const chartOption = computed<EChartsOption>(() => {
             },
         ]
         : { type: 'value', name: 'MW' }
-    const xAxis: EChartsOption['xAxis'] = {
-        type: 'category',
-        data: xLabels.value,
-        axisLabel: { interval: 7 },
-    }
     return {
         tooltip: {
             trigger: 'axis',
@@ -323,6 +324,13 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* 给 wrapper 加相对定位，以便遮罩层覆盖 */
+.content-wrapper {
+    position: relative;
+    min-height: 400px;
+    /* 防止内容为空时遮罩不可见 */
+}
+
 .tab-group {
     display: inline-flex;
     padding: 2px;

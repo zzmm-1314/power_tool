@@ -1,15 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
+import logging
 import os
+import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import (
     collect_all,
     collect_submodules,
     collect_dynamic_libs,
 )
+import certifi
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("spec")
 
 SPEC_DIR = Path(SPECPATH).resolve()
 PROJECT_ROOT = SPEC_DIR.parent if SPEC_DIR.name == "build" else SPEC_DIR
-print(f"[spec] PROJECT_ROOT={PROJECT_ROOT}")
+logger.info("PROJECT_ROOT=%s", PROJECT_ROOT)
 # ============ 轻量收集：大库只拉核心子模块 + 动态库，data 交给内置 hook ============
 LIGHT_LIBS = [
     "numpy",
@@ -35,6 +45,7 @@ FULL_LIBS = [
     "threadpoolctl",
     "jwt",
     "pymysql",
+    "mysql.connector",
     "watchdog",
     "requests",
     "urllib3",
@@ -81,7 +92,13 @@ EXTRA_HIDDEN = [
     "pymysql.constants",
     "pymysql.converters",
     "pymysql.cursors",
-
+    # mysql.connector 子模块（确保不被树摇优化掉）
+    "mysql.connector",
+    "mysql.connector.cursor",
+    "mysql.connector.constants",
+    "mysql.connector.connection",
+    "mysql.connector.protocol",
+    "mysql.connector.abstracts",
     # flask / werkzeug
     "flask.json",
     "flask.json.provider",
@@ -111,7 +128,7 @@ EXTRA_HIDDEN = [
 ]
 
 datas, binaries, hiddenimports = [], [], list(EXTRA_HIDDEN)
-
+datas += [(certifi.where(), 'certifi')]
 
 def _exclude_tests(name: str) -> bool:
     """排除 *.tests / *.test.* 子模块，大幅减少隐藏导入"""
@@ -126,14 +143,14 @@ def _exclude_tests(name: str) -> bool:
 for pkg in LIGHT_LIBS:
     try:
         hiddenimports += collect_submodules(pkg, filter=_exclude_tests)
-        print(f"[spec] collect_submodules({pkg}) OK")
+        logger.info("collect_submodules(%s) OK", pkg)
     except Exception as e:
-        print(f"[spec] collect_submodules({pkg}) 失败: {e}")
+        logger.warning("collect_submodules(%s) 失败: %s", pkg, e)
     try:
         binaries += collect_dynamic_libs(pkg)
-        print(f"[spec] collect_dynamic_libs({pkg}) OK")
+        logger.info("collect_dynamic_libs(%s) OK", pkg)
     except Exception as e:
-        print(f"[spec] collect_dynamic_libs({pkg}) 失败: {e}")
+        logger.warning("collect_dynamic_libs(%s) 失败: %s", pkg, e)
 
 # ============ 完整收集 ============
 for pkg in FULL_LIBS:
@@ -142,9 +159,11 @@ for pkg in FULL_LIBS:
         datas += d
         binaries += b
         hiddenimports += h
-        print(f"[spec] collect_all({pkg}) OK: datas={len(d)} binaries={len(b)} hidden={len(h)}")
+        logger.info(
+            "collect_all(%s) OK: datas=%s binaries=%s hidden=%s", pkg, len(d), len(b), len(h)
+        )
     except Exception as e:
-        print(f"[spec] collect_all({pkg}) 失败: {e}")
+        logger.warning("collect_all(%s) 失败: %s", pkg, e)
 
 # ============ 图标 ============
 # 依次尝试：项目根目录 app.ico → assets/app.ico
@@ -154,9 +173,9 @@ icon_candidates = [
 ]
 icon_path = next((p for p in icon_candidates if p.exists()), None)
 if icon_path is None:
-    print(f"[spec] 警告：未找到图标文件，已尝试: {[str(p) for p in icon_candidates]}")
+    logger.warning("未找到图标文件，已尝试: %s", [str(p) for p in icon_candidates])
 else:
-    print(f"[spec] icon={icon_path}")
+    logger.info("icon=%s", icon_path)
 
 # ============ Analysis ============
 a = Analysis(

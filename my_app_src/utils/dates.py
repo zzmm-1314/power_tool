@@ -1,17 +1,11 @@
 """日期工具（原 独立工具 dates.py 迁入）"""
 
 import re
+import os
 from datetime import datetime
+from typing import Optional
 
-
-def extract_date_from_filename(filename):
-    m = re.search(r"(\d{4})年(\d{2})月(\d{2})日", filename)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", filename)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    return None
+_DATE_PATTERN = re.compile(r"(\d{4})[年\-/.]?(\d{1,2})[月\-/.]?(\d{1,2})")
 
 
 def extract_date_from_cell_value(cell_value):
@@ -88,3 +82,30 @@ def get_tenday_value(date_obj, tenday_prices):
     if day <= 20:
         return tenday_prices[1]
     return tenday_prices[2]
+
+
+def extract_date_from_text(text) -> Optional[str]:
+    if text is None:
+        return None
+    m = _DATE_PATTERN.search(str(text))
+    if not m:
+        return None
+    y, mo, d = m.groups()
+    try:
+        return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+    except ValueError:
+        return None
+
+
+def extract_date_from_filename(filename: str) -> Optional[str]:
+    if not filename:
+        return None
+    base = os.path.basename(filename)
+    m = re.search(r"(\d{4})(\d{2})(\d{2})", base)
+    if m:
+        y, mo, d = m.groups()
+        try:
+            return f"{y}-{int(mo):02d}-{int(d):02d}"
+        except ValueError:
+            pass
+    return extract_date_from_text(base)

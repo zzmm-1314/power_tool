@@ -85,6 +85,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
+import { apiUrl } from '@/utils/apiBase'
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const selectedFiles = ref<File[]>([])
@@ -121,6 +122,7 @@ async function submitExtract() {
     extracting.value = true
     results.value = []
 
+    // 后端 multipart 上传：files + fields（JSON 字符串）
     const formData = new FormData()
     for (const f of selectedFiles.value) {
         formData.append('files', f)
@@ -128,13 +130,12 @@ async function submitExtract() {
     formData.append('fields', JSON.stringify(fields))
 
     try {
-        const res = await fetch('/api/monthly/extract-pdf', {
+        const res = await fetch(apiUrl('/monthly/extract-pdf'), {
             method: 'POST',
             body: formData,
         })
         const json = await res.json()
 
-        // 兼容后端 code 为 0 或 200 的情况
         if (json.code === 0 || json.code === 200) {
             results.value = json.data || []
         } else {
@@ -142,7 +143,7 @@ async function submitExtract() {
         }
     } catch (err) {
         console.error(err)
-        alert('请求失败，请检查网络或后端服务')
+        alert('请求失败：' + ((err as Error).message || '请检查网络或后端服务'))
     } finally {
         extracting.value = false
     }
@@ -159,7 +160,7 @@ async function exportExcel() {
     })
 
     try {
-        const res = await fetch('/api/monthly/export-excel', {
+        const res = await fetch(apiUrl('/monthly/export-excel'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ results: page1Results }),
@@ -183,7 +184,7 @@ async function downloadPage2() {
     if (!page2List.length) return
 
     try {
-        const res = await fetch('/api/monthly/export-page2-excel', {
+        const res = await fetch(apiUrl('/monthly/export-page2-excel'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ page2_list: page2List }),

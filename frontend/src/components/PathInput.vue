@@ -48,12 +48,6 @@ async function browse() {
 
 .input {
     flex: 1;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    font-size: 13px;
-    outline: none;
     font-family: 'Consolas', 'Monaco', monospace;
 }
 
@@ -65,7 +59,6 @@ async function browse() {
     height: 32px;
     padding: 0 14px;
     border: 1px solid #dcdfe6;
-    border-radius: 4px;
     background: #fff;
     color: #606266;
     font-size: 13px;

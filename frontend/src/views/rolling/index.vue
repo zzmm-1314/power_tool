@@ -1,5 +1,5 @@
 <template>
-    <PageContainer title="滚撮分析">
+    <PageContainer title="滚撮分析（市场级）">
         <!-- 控制栏 -->
         <div class="control-bar">
             <div class="form-group">
@@ -9,6 +9,11 @@
             <button class="btn-primary" :disabled="loading" @click="loadData">
                 {{ loading ? '计算中...' : '🔍 查询分析' }}
             </button>
+            <button class="btn-upload" :disabled="uploading" @click="triggerUpload">
+                {{ uploading ? '上传中...' : '📤 上传市场滚撮' }}
+            </button>
+            <input ref="fileInputRef" type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                @change="handleUpload" />
         </div>
 
         <!-- 图例说明 -->
@@ -20,6 +25,8 @@
             <span>价差：</span>
             <span class="dot spread-neg"></span> &lt; 0
             <span class="dot spread-pos"></span> &gt; 0
+            <span class="gap"></span>
+            <span class="hint">日前价格为 24 个整点时段均值；鼠标悬浮单元格可放大查看</span>
         </div>
 
         <!-- 表格区 -->
@@ -53,25 +60,26 @@
                             <td class="sticky-col col-time">{{ row.time }}</td>
                             <td :style="priceStyle(row.dayAheadPrice)">{{ format(row.dayAheadPrice) }}</td>
 
-                            <!-- D-2 -->
                             <td class="group-start">{{ format(row.d2Qty) }}</td>
                             <td>{{ format(row.d2Price) }}</td>
                             <td :style="diffStyle(row.d2Diff)">{{ format(row.d2Diff) }}</td>
 
-                            <!-- D-3 -->
                             <td class="group-start">{{ format(row.d3Qty) }}</td>
                             <td>{{ format(row.d3Price) }}</td>
                             <td :style="diffStyle(row.d3Diff)">{{ format(row.d3Diff) }}</td>
 
-                            <!-- D-4 -->
                             <td class="group-start">{{ format(row.d4Qty) }}</td>
                             <td>{{ format(row.d4Price) }}</td>
                             <td :style="diffStyle(row.d4Diff)">{{ format(row.d4Diff) }}</td>
 
-                            <!-- 市场合计 -->
                             <td class="group-start">{{ format(row.marketQty) }}</td>
                             <td>{{ format(row.marketPrice) }}</td>
                             <td :style="diffStyle(row.marketDiff)">{{ format(row.marketDiff) }}</td>
+                        </tr>
+                        <tr v-if="!tableData.length">
+                            <td colspan="14" class="empty-row">
+                                {{ loading ? '加载中...' : '请选择标的日并点击查询' }}
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -83,42 +91,27 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
+import { request } from '@/api/request'
 
 const loading = ref(false)
-const params = reactive({
-    date: '2026-10-30', // 标的日
-})
-
-// 根据标的日计算具体日期
-function getDateOffset(baseDate: string, offsetDays: number): string {
-    if (!baseDate) return ''
-    const d = new Date(baseDate)
-    d.setDate(d.getDate() - offsetDays)
-    return d.toISOString().slice(0, 10)
-}
-
-const dateD2 = computed(() => getDateOffset(params.date, 2))
-const dateD3 = computed(() => getDateOffset(params.date, 3))
-const dateD4 = computed(() => getDateOffset(params.date, 4))
-
-// 存储表格数据
+const uploading = ref(false)
+const params = reactive({ date: '' })
 const tableData = ref<any[]>([])
+const fileInputRef = ref<HTMLInputElement | null>(null)
 
-// 时间标签
-const SLOT_LABELS = Array.from({ length: 48 }).map((_, i) => {
-    const h = Math.floor(i / 2)
-    const m = (i % 2) * 30
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-})
+// 后端返回的 D-2/D-3/D-4 日期（用于表头）
+const apiDates = reactive({ d2: '', d3: '', d4: '' })
 
-// 格式化显示
+const dateD2 = computed(() => apiDates.d2 || 'D-2')
+const dateD3 = computed(() => apiDates.d3 || 'D-3')
+const dateD4 = computed(() => apiDates.d4 || 'D-4')
+
 function format(v: number | null | undefined) {
     if (v == null || isNaN(v)) return '-'
     return v.toFixed(3)
 }
 
-// 样式：日前价格（基准350）
-function priceStyle(v: number) {
+function priceStyle(v: number | null) {
     if (v == null) return {}
     const base = 350
     if (v < base) {
@@ -130,157 +123,71 @@ function priceStyle(v: number) {
     }
 }
 
-// 样式：价差（基准0）
 function diffStyle(v: number | null) {
     if (v == null || v === 0) return {}
+    const intensity = Math.min(Math.abs(v) / 100, 1)
     if (v > 0) {
-        const intensity = Math.min(Math.abs(v) / 100, 1)
         return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
     } else {
-        const intensity = Math.min(Math.abs(v) / 100, 1)
         return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
     }
 }
 
-// 计算逻辑
 async function loadData() {
     if (!params.date) return alert('请选择标的日')
     loading.value = true
-
-    setTimeout(() => {
-        // 模拟当日日前价格(48点)
-        const dayAheadPrices = Array.from({ length: 48 }).map(() => 300 + Math.random() * 200)
-
-        // 模拟 D-2、D-3、D-4 的成交数据（24点）
-        const tradesD2 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 100, price: 400 + Math.random() * 100 }))
-        const tradesD3 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 80, price: 410 + Math.random() * 100 }))
-        const tradesD4 = Array.from({ length: 24 }).map(() => ({ qty: Math.random() * 120, price: 390 + Math.random() * 100 }))
-
-        let rows = []
-
-        for (let i = 0; i < 48; i++) {
-            const hourIdx = Math.floor(i / 2) // 24点数据索引
-            const daPrice = dayAheadPrices[i]
-
-            // D-2
-            const d2Qty = tradesD2[hourIdx].qty
-            const d2Price = tradesD2[hourIdx].price
-            const d2Diff = d2Price - daPrice
-
-            // D-3
-            const d3Qty = tradesD3[hourIdx].qty
-            const d3Price = tradesD3[hourIdx].price
-            const d3Diff = d3Price - daPrice
-
-            // D-4
-            const d4Qty = tradesD4[hourIdx].qty
-            const d4Price = tradesD4[hourIdx].price
-            const d4Diff = d4Price - daPrice
-
-            // 市场合计计算
-            const marketQty = d2Qty + d3Qty + d4Qty
-            const marketPrice = marketQty > 0
-                ? (d2Qty * d2Price + d3Qty * d3Price + d4Qty * d4Price) / marketQty
-                : 0
-            const marketDiff = marketQty > 0 ? marketPrice - daPrice : 0
-
-            rows.push({
-                time: SLOT_LABELS[i],
-                dayAheadPrice: daPrice,
-
-                d2Qty, d2Price, d2Diff,
-                d3Qty, d3Price, d3Diff,
-                d4Qty, d4Price, d4Diff,
-
-                marketQty, marketPrice, marketDiff
-            })
-        }
-
-        tableData.value = rows
+    try {
+        const res: any = await request({
+            url: '/rolling/analysis',
+            method: 'get',
+            params: { targetDate: params.date },
+        })
+        tableData.value = res.rows || []
+        apiDates.d2 = res.d2Date || ''
+        apiDates.d3 = res.d3Date || ''
+        apiDates.d4 = res.d4Date || ''
+    } catch (err: any) {
+        alert('查询失败：' + (err.message || '后端服务异常'))
+        tableData.value = []
+    } finally {
         loading.value = false
-    }, 500)
+    }
 }
-// import { ref, reactive, computed } from 'vue'
-// import PageContainer from '@/components/PageContainer.vue'
-// import { request } from '@/api/request' // 引入你封装的 axios
 
-// const loading = ref(false)
-// const params = reactive({
-//     date: '2026-10-30',
-// })
+function triggerUpload() {
+    fileInputRef.value?.click()
+}
 
-// // 接收后端返回的日期
-// const dateD2 = ref('D-2')
-// const dateD3 = ref('D-3')
-// const dateD4 = ref('D-4')
+async function handleUpload(e: Event) {
+    const target = e.target as HTMLInputElement
+    const files = target.files
+    if (!files || !files.length) return
 
-// const tableData = ref<any[]>([])
+    uploading.value = true
+    const fd = new FormData()
+    for (let i = 0; i < files.length; i++) {
+        fd.append('files', files[i])
+    }
 
-// const SLOT_LABELS = Array.from({ length: 48 }).map((_, i) => {
-//     const h = Math.floor(i / 2)
-//     const m = (i % 2) * 30
-//     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-// })
-
-// function format(v: number | null | undefined) {
-//     if (v == null || isNaN(v)) return '-'
-//     return v.toFixed(3)
-// }
-
-// function priceStyle(v: number | null) {
-//     if (v == null) return {}
-//     const base = 350
-//     if (v < base) {
-//         const intensity = Math.min((base - v) / 200, 1)
-//         return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
-//     } else {
-//         const intensity = Math.min((v - base) / 200, 1)
-//         return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
-//     }
-// }
-
-// function diffStyle(v: number | null) {
-//     if (v == null || v === 0) return {}
-//     if (v > 0) {
-//         const intensity = Math.min(Math.abs(v) / 100, 1)
-//         return { backgroundColor: `rgba(245, 108, 108, ${0.1 + intensity * 0.6})`, color: '#303133' }
-//     } else {
-//         const intensity = Math.min(Math.abs(v) / 100, 1)
-//         return { backgroundColor: `rgba(103, 194, 58, ${0.1 + intensity * 0.6})`, color: '#303133' }
-//     }
-// }
-
-// async function loadData() {
-//     if (!params.date) return alert('请选择标的日')
-//     loading.value = true
-
-//     try {
-//         // 请求真实接口
-//         const res = await request({
-//             url: '/rolling/analysis',
-//             method: 'get',
-//             params: { targetDate: params.date }
-//         })
-
-//         const data = (res as any).data || res
-
-//         if (data && data.rows) {
-//             tableData.value = data.rows
-//             // 更新表头日期
-//             dateD2.value = data.d2Date
-//             dateD3.value = data.d3Date
-//             dateD4.value = data.d4Date
-//         }
-//     } catch (err: any) {
-//         alert('查询失败：' + (err.message || '后端服务异常'))
-//     } finally {
-//         loading.value = false
-//     }
-// }
+    try {
+        const res: any = await request({
+            url: '/rolling/market-upload',
+            method: 'post',
+            data: fd,
+        })
+        alert(`上传成功，共 ${res.count || 0} 条`)
+        await loadData()
+    } catch (err: any) {
+        alert('上传失败：' + (err.message || '未知错误'))
+    } finally {
+        uploading.value = false
+        target.value = ''
+    }
+}
 </script>
 
 <style scoped>
-/* 控制栏 */
+/* ===== 控制栏 ===== */
 .control-bar {
     display: flex;
     align-items: center;
@@ -322,7 +229,6 @@ async function loadData() {
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
-    margin-left: auto;
 }
 
 .btn-primary:disabled {
@@ -330,7 +236,31 @@ async function loadData() {
     cursor: not-allowed;
 }
 
-/* 图例 */
+.btn-upload {
+    height: 34px;
+    padding: 0 16px;
+    background: #fff;
+    color: #2d6cdf;
+    border: 1px solid #2d6cdf;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-upload:hover:not(:disabled) {
+    background: #ecf5ff;
+}
+
+.btn-upload:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.hidden-input {
+    display: none;
+}
+
+/* ===== 图例 ===== */
 .legend-tip {
     display: flex;
     align-items: center;
@@ -342,6 +272,7 @@ async function loadData() {
     font-size: 12px;
     color: #606266;
     margin-top: 12px;
+    flex-wrap: wrap;
 }
 
 .dot {
@@ -352,18 +283,12 @@ async function loadData() {
     border: 1px solid #ebeef5;
 }
 
-.dot.price-low {
-    background: rgba(103, 194, 58, 0.6);
-}
-
-.dot.price-high {
-    background: rgba(245, 108, 108, 0.6);
-}
-
+.dot.price-low,
 .dot.spread-neg {
     background: rgba(103, 194, 58, 0.6);
 }
 
+.dot.price-high,
 .dot.spread-pos {
     background: rgba(245, 108, 108, 0.6);
 }
@@ -372,7 +297,12 @@ async function loadData() {
     width: 16px;
 }
 
-/* 表格 */
+.hint {
+    color: #909399;
+    margin-left: auto;
+}
+
+/* ===== 表格卡片 ===== */
 .result-card {
     background: #fff;
     border-radius: 8px;
@@ -390,6 +320,7 @@ async function loadData() {
     overflow: auto;
 }
 
+/* ===== 表格 ===== */
 .data-table {
     width: 100%;
     border-collapse: separate;
@@ -401,10 +332,15 @@ async function loadData() {
 
 .data-table th,
 .data-table td {
-    padding: 8px 10px;
+    padding: 4px 10px;
+    /* 保持行高紧凑（上次已缩半） */
     border-bottom: 1px solid #ebeef5;
     border-right: 1px solid #ebeef5;
     font-variant-numeric: tabular-nums;
+    position: relative;
+    /* ← hover 伪元素需要 */
+    background: #fff;
+    /* 让 inherit 拿到白底 */
 }
 
 .data-table th {
@@ -416,7 +352,7 @@ async function loadData() {
     z-index: 2;
 }
 
-/* 区分分组 */
+/* 分组左边框 */
 .group-start {
     border-left: 2px solid #dcdfe6;
 }
@@ -425,21 +361,53 @@ async function loadData() {
     border-left: 2px solid #c0c4cc;
 }
 
-/* 固定首列 */
+/* ===== 单元格悬浮突出 ===== */
+.data-table tbody td {
+    cursor: crosshair;
+    transition: box-shadow 0.12s ease;
+}
+
+/* 非 sticky 单元格：伪元素外扩 3px，继承原背景色（保留色阶），描边 + 阴影浮起 */
+.data-table tbody td:not(.sticky-col):hover {
+    z-index: 20;
+}
+
+.data-table tbody td:not(.sticky-col):hover::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 4px;
+    background: inherit;
+    box-shadow: 0 0 0 2px #1f2d3d, 0 8px 24px rgba(0, 0, 0, 0.35);
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* 时段列（sticky）悬浮改为浅蓝背景，不用伪元素避免 sticky 错位 */
 .sticky-col {
     position: sticky;
     background: #f5f7fa;
     z-index: 1;
     border-right: 1px solid #dcdfe6;
+    left: 0;
+    width: 96px;
+    font-weight: 500;
 }
 
 .data-table th.sticky-col {
     z-index: 3;
 }
 
-.col-time {
-    left: 0;
-    width: 60px;
-    font-weight: 500;
+.data-table tbody td.sticky-col:hover {
+    background: #ecf5ff;
+    color: #2d6cdf;
+    font-weight: 700;
+}
+
+/* 空数据行 */
+.empty-row {
+    text-align: center;
+    color: #909399;
+    padding: 40px 0 !important;
 }
 </style>

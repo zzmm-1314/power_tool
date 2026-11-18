@@ -1,4 +1,9 @@
-"""月报生成服务：模板管理 + PDF 解析 + Word 渲染"""
+"""月报生成服务：模板管理 + PDF 解析 + Word 渲染
+
+单一入口（纯后端 pdfplumber 提取）：
+    parse_pdf_preview(pdf_bytes, filename)  → 字段预览
+    render_docx(template_name, pdf_bytes, filename) → 生成 Word
+"""
 
 import base64
 import io
@@ -10,11 +15,7 @@ from typing import Dict, List
 from docxtpl import DocxTemplate
 
 from config import Config
-from utils.pdf_parser import (
-    FIELDS_META,
-    build_sheets,
-    extract_data,
-)
+from utils.pdf_parser import FIELDS_META, build_sheets, extract_data
 
 # ==================== 目录 ====================
 

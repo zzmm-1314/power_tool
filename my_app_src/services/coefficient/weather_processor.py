@@ -2,6 +2,9 @@
 import numpy as np
 import pandas as pd
 from services.coefficient import coefficient_config as config
+from utils.logger import get_logger
+
+logger = get_logger("services.coefficient.weather_processor")
 
 
 def sigmoid(x, slope=1.0, shift=0.0):
@@ -22,13 +25,13 @@ def detect_extreme_weather(row, hour):
 
     if wind > config.EXTREME_WIND_THRESHOLD:
         offset += config.EXTREME_WIND_OFFSET
-        print(
+        logger.warning(
             f"极端大风预警：风速 {wind:.1f} km/h，施加偏移 {config.EXTREME_WIND_OFFSET:.2f}"
         )
 
     if temp > config.EXTREME_TEMP_THRESHOLD:
         offset += config.EXTREME_TEMP_OFFSET
-        print(
+        logger.warning(
             f"极端高温预警：体感温度 {temp:.1f}℃，施加偏移 {config.EXTREME_TEMP_OFFSET:.2f}"
         )
 
@@ -119,49 +122,6 @@ def calculate_solar_factor(row, hour):
         solar_factor = base_solar
 
     return np.clip(solar_factor, 0.0, 1.0)
-
-
-def weather_derived_factor(row, hour):
-    cloud = row.get("cloud_cover_low (%)", 50)
-    apparent_temp = row.get("apparent_temperature (°C)", 25)
-    humidity = row.get("relative_humidity_2m (%)", 65)
-    wind = row.get("wind_speed_80m (km/h)", config.WIND_BASE)
-
-    if 9 <= hour <= 16:
-        solar_strength = calculate_solar_factor(row, hour)
-        pv_offset = config.PV_OFFSET_FACTOR * solar_strength
-    else:
-        pv_offset = 0.0
-
-    if 12 <= hour <= 21:
-        effective_temp = calculate_effective_temp(apparent_temp, humidity)
-        if config.WEATHER_CORRECTION_MODE == "nonlinear":
-            temp_norm = sigmoid(
-                effective_temp,
-                slope=config.TEMP_SIGMOID_SLOPE,
-                shift=config.TEMP_SIGMOID_THRESHOLD,
-            )
-            max_offset = config.TEMP_OFFSET_FACTOR * 10
-            temp_offset = -max_offset * temp_norm
-        else:
-            temp_offset = -config.TEMP_OFFSET_FACTOR * (
-                effective_temp - config.TEMP_BASE
-            )
-    else:
-        temp_offset = 0.0
-
-    if hour >= 20 or hour <= 6:
-        if config.WEATHER_CORRECTION_MODE == "nonlinear":
-            wind_dev = wind - config.WIND_TANH_SHIFT
-            wind_offset = config.WIND_OFFSET_FACTOR * tanh_scaled(
-                wind_dev, scale=config.WIND_TANH_SCALE
-            )
-        else:
-            wind_offset = config.WIND_OFFSET_FACTOR * (wind - config.WIND_BASE)
-    else:
-        wind_offset = 0.0
-
-    return 1.0 + pv_offset + temp_offset + wind_offset
 
 
 def calculate_gen_risk_offset(apparent_temp: float):

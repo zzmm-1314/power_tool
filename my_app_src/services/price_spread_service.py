@@ -1,10 +1,6 @@
-"""价差分析服务：日前 − 实时（统一结算点 + 电厂节点）—— 48 点精度
-
-数据来源为业务数据库（原 data/temp 临时 Excel 存储已删除）。
-"""
+"""价差分析服务：日前 − 实时（统一结算点 + 电厂节点）—— 48 点精度"""
 
 from typing import Dict, List, Optional
-
 from services.day_ahead_parser import (
     TARGET_DEVICE_REAL_TIME,
     _norm_time,
@@ -15,30 +11,19 @@ from services.day_ahead_service import (
     DataSource,
     _merge_source,
     load_items,
-    load_node_items,
     load_unified_items,
+    load_node_items,
 )
 
 
-# ============================================================
-#                    实时价格数据（spread/unified）
-# ============================================================
-
-
-def load_spread_unified_items() -> List[Dict]:
+def load_spread_unified_items(start_date=None, end_date=None) -> List[Dict]:
     """实时 · 统一结算点全部日期数据"""
-    return load_items("spread", "unified", TARGET_DEVICE_REAL_TIME)
-
-
-# ============================================================
-#               辅助：raw → 48 槽位数组
-# ============================================================
+    return load_items(
+        "spread", "unified", TARGET_DEVICE_REAL_TIME, start_date, end_date
+    )
 
 
 def _raw_to_slots(raw: List[Dict]) -> List[Optional[float]]:
-    """把 [{time, value}] 转为长度为 48 的槽位数组
-    索引 0='00:30'、1='01:00'、...、47='24:00'
-    """
     slots: List[Optional[float]] = [None] * 48
     for pt in raw or []:
         t = _norm_time(pt.get("time"))
@@ -52,15 +37,10 @@ def _raw_to_slots(raw: List[Dict]) -> List[Optional[float]]:
     return slots
 
 
-# ============================================================
-#              价差热力图（48 点通用构建）
-# ============================================================
-
-
 def _empty_spread_heatmap() -> Dict:
     return {
         "dates": [],
-        "hours": SLOT_TIMES,  # 48 个时间标签
+        "hours": SLOT_TIMES,
         "matrix": [],
         "source": DataSource.EMPTY,
         "minValue": 0,
@@ -75,12 +55,12 @@ def _build_spread_heatmap(
     days: int = 14,
     start_date: Optional[str] = None,
 ) -> Dict:
+    # 数据已经在 load_items 里自动合并了（江苏库优先，浙江库兜底）
     day_map = {it["date"]: it for it in day_items}
     rt_map = {it["date"]: it for it in rt_items}
 
     common_dates = sorted(set(day_map.keys()) & set(rt_map.keys()))
 
-    # 优先 startDate/endDate；都不传时回退到 days
     if start_date or end_date:
         if start_date:
             common_dates = [d for d in common_dates if d >= start_date]
@@ -125,8 +105,8 @@ def _spread_single(day_items: List[Dict], rt_items: List[Dict], date: str) -> Di
     if not day_items or not rt_items:
         return {"date": date, "source": DataSource.EMPTY, "hourly": []}
 
-    day_slots = _raw_to_slots(day_items[-1]["raw"])
-    rt_slots = _raw_to_slots(rt_items[-1]["raw"])
+    day_slots = _raw_to_slots(day_items[0]["raw"])
+    rt_slots = _raw_to_slots(rt_items[0]["raw"])
 
     hourly = []
     for i, label in enumerate(SLOT_TIMES):
@@ -145,7 +125,7 @@ def _spread_single(day_items: List[Dict], rt_items: List[Dict], date: str) -> Di
 
 
 # ============================================================
-#                    统一结算点（日前 − 实时）
+#                    对外查询接口
 # ============================================================
 
 
@@ -154,28 +134,15 @@ def fetch_spread_heatmap(
     days: int = 14,
     start_date: Optional[str] = None,
 ) -> Dict:
-    return _build_spread_heatmap(
-        load_unified_items(),
-        load_spread_unified_items(),
-        end_date,
-        days,
-        start_date=start_date,
-    )
+    day_items = load_unified_items(start_date, end_date)
+    rt_items = load_spread_unified_items(start_date, end_date)
+    return _build_spread_heatmap(day_items, rt_items, end_date, days, start_date)
 
 
 def fetch_spread_single_day(date: str) -> Dict:
-    day_items = [it for it in load_unified_items() if it["date"] == date]
-    rt_items = [it for it in load_spread_unified_items() if it["date"] == date]
+    day_items = load_unified_items(date, date)
+    rt_items = load_spread_unified_items(date, date)
     return _spread_single(day_items, rt_items, date)
-
-
-# ============================================================
-#                    电厂节点（日前节点 − 实时节点）
-# ============================================================
-
-
-def _read_spread_plant_node(node_name: str) -> List[Dict]:
-    return load_node_items(node_name, base_subdir="spread/plant")
 
 
 def fetch_spread_plant_heatmap(
@@ -187,32 +154,32 @@ def fetch_spread_plant_heatmap(
     if not node_name:
         return _empty_spread_heatmap()
 
-    day_items = load_node_items(node_name, base_subdir="day-ahead/plant")
-    rt_items = _read_spread_plant_node(node_name)
-    return _build_spread_heatmap(
-        day_items, rt_items, end_date, days, start_date=start_date
+    day_items = load_node_items(
+        node_name,
+        base_subdir="day-ahead/plant",
+        start_date=start_date,
+        end_date=end_date,
     )
+    rt_items = load_node_items(
+        node_name, base_subdir="spread/plant", start_date=start_date, end_date=end_date
+    )
+    return _build_spread_heatmap(day_items, rt_items, end_date, days, start_date)
 
 
 def fetch_spread_plant_single_day(node_name: str, date: str) -> Dict:
-    day_items = [
-        it
-        for it in load_node_items(node_name, base_subdir="day-ahead/plant")
-        if it["date"] == date
-    ]
-    rt_items = [it for it in _read_spread_plant_node(node_name) if it["date"] == date]
+    day_items = load_node_items(
+        node_name, base_subdir="day-ahead/plant", start_date=date, end_date=date
+    )
+    rt_items = load_node_items(
+        node_name, base_subdir="spread/plant", start_date=date, end_date=date
+    )
     return _spread_single(day_items, rt_items, date)
-
-
-# ============================================================
-#              单日价格明细（日前 / 实时 / 价差）
-# ============================================================
 
 
 def _empty_daily_prices(date: str) -> Dict:
     return {
         "date": date,
-        "hours": SLOT_TIMES,  # 48 个时间标签
+        "hours": SLOT_TIMES,
         "dayAhead": [],
         "realTime": [],
         "spread": [],
@@ -225,34 +192,27 @@ def fetch_spread_daily_prices(
     node_type: str = "unified",
     node_name: Optional[str] = None,
 ) -> Dict:
-    """
-    返回单日的日前价格、实时价格、价差（各 48 点）。
-    - node_type="unified"：日前统一结算点 + 实时统一结算点
-    - node_type="plant"  ：日前节点 + 实时节点
-    """
     if not date:
         return _empty_daily_prices(date)
 
     if node_type == "unified":
-        day_items = [it for it in load_unified_items() if it["date"] == date]
-        rt_items = [it for it in load_spread_unified_items() if it["date"] == date]
+        day_items = load_unified_items(date, date)
+        rt_items = load_spread_unified_items(date, date)
     else:
         if not node_name:
             return _empty_daily_prices(date)
-        day_items = [
-            it
-            for it in load_node_items(node_name, base_subdir="day-ahead/plant")
-            if it["date"] == date
-        ]
-        rt_items = [
-            it for it in _read_spread_plant_node(node_name) if it["date"] == date
-        ]
+        day_items = load_node_items(
+            node_name, base_subdir="day-ahead/plant", start_date=date, end_date=date
+        )
+        rt_items = load_node_items(
+            node_name, base_subdir="spread/plant", start_date=date, end_date=date
+        )
 
     if not day_items or not rt_items:
         return _empty_daily_prices(date)
 
-    day_slots = _raw_to_slots(day_items[-1]["raw"])
-    rt_slots = _raw_to_slots(rt_items[-1]["raw"])
+    day_slots = _raw_to_slots(day_items[0]["raw"])
+    rt_slots = _raw_to_slots(rt_items[0]["raw"])
 
     spread_slots: List[Optional[float]] = []
     for i in range(48):

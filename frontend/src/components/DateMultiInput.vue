@@ -31,30 +31,8 @@ function onInput(e: Event) {
     align-items: flex-start;
 }
 
-.textarea {
-    flex: 1;
-    padding: 6px 10px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    font-size: 13px;
-    font-family: 'Consolas', 'Monaco', monospace;
-    outline: none;
-    resize: vertical;
-}
-
 .textarea:focus {
     border-color: #2d6cdf;
-}
-
-.btn-clear {
-    height: 32px;
-    padding: 0 12px;
-    border: 1px solid #dcdfe6;
-    border-radius: 4px;
-    background: #fff;
-    color: #606266;
-    font-size: 12px;
-    cursor: pointer;
 }
 
 .btn-clear:hover {

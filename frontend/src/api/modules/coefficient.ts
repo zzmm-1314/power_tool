@@ -17,22 +17,6 @@ export interface CorrectionItem {
     humidity_contribution: number
 }
 
-export interface PredictResult {
-    success: boolean
-    strategy: string
-    half_life: number
-    target_date: string
-    window_days: number
-    hours: string[]
-    base_coefficients: number[]
-    coefficients: number[]
-    correction_details: CorrectionItem[]
-    weather_data: Record<string, any>[] | null
-    weather_meta: Record<string, any> | null
-    coeff_min: number
-    coeff_max: number
-}
-
 export interface ProgressData {
     status: 'running' | 'done' | 'error'
     progress: { stage: string; current: number; total: number; message: string }
@@ -72,7 +56,7 @@ export interface PredictResult {
     hours: string[]
     base_coefficients: number[]
     coefficients: number[]
-    all_coeffs_curves: AllCoeffCurve[]   // ← 新增
+    all_coeffs_curves: AllCoeffCurve[]
     correction_details: CorrectionItem[]
     weather_data: Record<string, any>[] | null
     weather_meta: Record<string, any> | null

@@ -306,7 +306,6 @@ watch(visible, (v) => emit('update:modelValue', v))
 }
 
 .input {
-    height: 28px;
     width: 120px;
     padding: 0 8px;
     border: 1px solid #dcdfe6;
@@ -335,7 +334,6 @@ watch(visible, (v) => emit('update:modelValue', v))
 }
 
 .btn {
-    height: 32px;
     padding: 0 16px;
     border: none;
     border-radius: 4px;
