@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from .regime_detector import MarketRegimeDetector
 from .ml_enhancer import RidgeGapPredictor
-from services.coefficient import coefficient_config as config
+from services.coefficient import coefficient_config as cfg
 from .coefficient_config import (
     WINDOW_DAYS,
     D_OFFSET,
@@ -56,7 +56,7 @@ class CoefficientPredictor:
         strategy_family: str = None,
         half_life: float = None,
         window_days: int = WINDOW_DAYS,
-        apply_weather: bool = WEATHER_ENABLED,
+        apply_weather: bool = None,
         detection_offset_days: int = 3,
         progress_callback=None,
         coeff_min: float = None,  # ★ 新增
@@ -109,7 +109,7 @@ class CoefficientPredictor:
         report("市场转向检测", 0, 1, "检测市场结构变化")
         if REGIME_DETECTION_ENABLED:
             detection_reference = target - timedelta(days=detection_offset_days)
-            detector = MarketRegimeDetector(self.history, config)
+            detector = MarketRegimeDetector(self.history, cfg)
             shift_flags, shift_confidences, recommended_hist_weights = detector.detect(
                 detection_reference
             )
@@ -198,7 +198,8 @@ class CoefficientPredictor:
         correction_log = []
         weather_48 = None  # ★ 提到外层
         has_weather = weather_df is not None and len(weather_df) > 0  # ★
-
+        if apply_weather is None:
+            apply_weather = cfg.WEATHER_ENABLED
         if apply_weather and has_weather:  # ★ 双条件
             report("天气修正", 0, 48, "应用天气修正")
             weather_48 = self._prepare_weather_data(weather_df, target)
@@ -218,7 +219,7 @@ class CoefficientPredictor:
 
                 weather_offset = (
                     pv_offset + temp_offset + humidity_offset + wind_offset
-                ) * WEATHER_WEIGHT
+                ) * cfg.WEATHER_WEIGHT
 
                 gen_offset = calculate_gen_risk_offset(
                     row.get("apparent_temperature (°C)", 25)
@@ -235,11 +236,16 @@ class CoefficientPredictor:
                     + ml_offset
                 )
                 final = np.clip(final, clip_min, clip_max)
-
+                if hour == 47:
+                    time_label = "24:00"
+                else:
+                    h = (hour + 1) // 2
+                    mi = 30 if hour % 2 == 0 else 0
+                    time_label = f"{h:02d}:{mi:02d}"
                 correction_log.append(
                     {
                         "period": hour,
-                        "time_label": f"{hour//2:02d}:{30 if hour%2 else 0:02d}",
+                        "time_label": time_label,
                         "base_coefficient": float(temp_coeff),
                         "pv_offset": float(pv_offset),
                         "temp_offset": float(temp_offset),
@@ -261,10 +267,16 @@ class CoefficientPredictor:
         else:
             final_coeffs = [float(round(float(c), 4)) for c in base_coeffs]
             for hour in range(48):
+                if hour == 47:
+                    time_label = "24:00"
+                else:
+                    h = (hour + 1) // 2
+                    mi = 30 if hour % 2 == 0 else 0
+                    time_label = f"{h:02d}:{mi:02d}"
                 correction_log.append(
                     {
                         "period": hour,
-                        "time_label": f"{hour//2:02d}:{30 if hour%2 else 0:02d}",
+                        "time_label": time_label,
                         "base_coefficient": float(base_coeffs[hour]),
                         "pv_offset": 0.0,
                         "temp_offset": 0.0,

@@ -28,8 +28,6 @@ def start(task_type: str):
     qty_tenday1 = float(params.get("qty_tenday1", 0) or 0)
     qty_tenday2 = float(params.get("qty_tenday2", 0) or 0)
     qty_tenday3 = float(params.get("qty_tenday3", 0) or 0)
-    declaration_data = params.get("declaration_data") or []
-    params["declaration_data"] = declaration_data
     if task_type == "simulate":
         if not node_name or not start_date or not end_date:
             return fail("需要参数 node_name, start_date, end_date")
@@ -68,7 +66,6 @@ def start(task_type: str):
     required = {
         "actual": ["folder", "target_file"],
         "general": [
-            "fixed_file",  # ⭐ 保留固定申报功率
             "target_file",
             "annual_price",
             "monthly_price",
@@ -143,6 +140,60 @@ def browse_folder():
         return success({"path": path or ""})
     except Exception as e:
         return fail(f"弹出文件夹对话框失败：{e}（可能无 GUI 环境）")
+
+
+@settlement_bp.get("/declaration-template")
+def download_declaration_template():
+    """下载 48 点申报电量模板：48 行（时段）× 31 列（每月每天）"""
+    import pandas as pd
+    from io import BytesIO
+    from flask import send_file
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    # 48 个时段标签，与 sim_v2 / _common 一致：00:30 ~ 24:00
+    time_labels = []
+    for i in range(48):
+        if i == 47:
+            time_labels.append("24:00")
+        else:
+            h = (i + 1) // 2
+            mi = 30 if (i % 2 == 0) else 0
+            time_labels.append(f"{h:02d}:{mi:02d}")
+
+    # 表头：时段 | 1日 | 2日 | ... | 31日
+    headers = ["时段"] + [f"{d}日" for d in range(1, 32)]
+
+    # 数据：48 行 × 32 列（第 1 列时段，其余 31 天初始 0）
+    data = [[t] + [0.0] * 31 for t in time_labels]
+
+    df = pd.DataFrame(data, columns=headers)
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="申报电量")
+        ws = writer.sheets["申报电量"]
+
+        # 列宽
+        ws.column_dimensions["A"].width = 10
+        for col in range(2, 33):
+            ws.column_dimensions[get_column_letter(col)].width = 10
+
+        # 冻结首行首列，方便填写
+        ws.freeze_panes = "B2"
+
+        # 表头加粗
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="48点申报电量模板.xlsx",
+    )
 
 
 @settlement_bp.post("/actual/upload")

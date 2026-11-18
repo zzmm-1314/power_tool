@@ -14,8 +14,6 @@ from services.bid_space_service import (
     fetch_day_ahead_range,
     fetch_realtime_range,
 )
-from services.bid_space_service import fetch_day_ahead_range
-from services.database_provider import fetch_series
 from datetime import datetime, timedelta
 from services.day_ahead_parser import (
     TARGET_DEVICE_UNIFIED,
@@ -169,9 +167,6 @@ def load_items(
 
 
 def _merge_source(items: List[Dict]) -> str:
-    """有预览数据时优先标记为预览，否则按数据库处理"""
-    if any(it.get("source") == DataSource.PREVIEW for it in items):
-        return DataSource.PREVIEW
     return DataSource.DB if items else DataSource.EMPTY
 
 

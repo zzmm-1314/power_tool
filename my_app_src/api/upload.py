@@ -291,17 +291,3 @@ def upload():
         payload.update(results[0])
 
     return success(payload, msg=msg)
-
-
-@upload_bp.get("/preview")
-def preview_state():
-    """当前内存预览概览（页面刷新后可判断是否还有预览数据）"""
-    return success(preview_store.summary())
-
-
-@upload_bp.delete("/preview")
-def clear_preview():
-    """清空内存预览（只清预览，不影响已入库数据）"""
-    data_type = (request.args.get("dataType") or "").strip() or None
-    removed = preview_store.clear(data_type)
-    return success({"removed": removed}, msg="已清空内存预览数据")

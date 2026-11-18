@@ -370,9 +370,9 @@ def upload_node_data():
         traceback.print_exc()
         return fail(f"合约数据解析失败: {e}")
 
-        return success(
-            msg=f"{data_type} 上传成功，聚合 {len(saved_files)} 个文件，入库 {total_count} 条"
-        )
+    return success(
+        msg=f"{data_type} 上传成功，聚合 {len(saved_files)} 个文件，入库 {total_count} 条"
+    )
 
     # ================= 特殊处理：滚撮数据 =================
     if data_type == "rolling":

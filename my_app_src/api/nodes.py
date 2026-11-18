@@ -2,7 +2,7 @@
 from flask import Blueprint, request
 from services.bid_space_service import fetch_unit_names
 from services.db_store import fetch_contract_config, save_contract_config
-from utils.response import success
+from utils.response import success, fail
 import json
 
 nodes_bp = Blueprint("nodes", __name__)

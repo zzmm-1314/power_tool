@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 import uuid
+import time
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -17,12 +18,47 @@ from services.coefficient.data_source import build_gap_df
 from services.coefficient.predictor import CoefficientPredictor
 from utils.response import success, fail
 from utils.logger import get_logger
-logger = get_logger('api.coefficient')
+
+logger = get_logger("api.coefficient")
 
 coefficient_bp = Blueprint("coefficient", __name__)
 
 TASKS: Dict[str, dict] = {}
 TASKS_LOCK = threading.Lock()
+# 任务结束后在内存中保留的时长（秒），供前端轮询取结果
+TASK_TTL_SECONDS = 600
+# TASKS 字典硬上限，超过时优先淘汰最旧的已结束任务
+TASK_MAX_COUNT = 200
+
+
+def _cleanup_tasks_locked() -> None:
+    """清理已结束且超时的任务；若仍超上限，淘汰最旧的已结束任务。
+
+    必须在持有 TASKS_LOCK 时调用；不会删除 status 为 running 的任务。
+    """
+    now = time.time()
+
+    # 1) TTL 过期清理
+    expired = [
+        tid
+        for tid, t in TASKS.items()
+        if t.get("finished_at") is not None
+        and now - t["finished_at"] > TASK_TTL_SECONDS
+    ]
+    for tid in expired:
+        TASKS.pop(tid, None)
+
+    # 2) 硬上限兜底
+    if len(TASKS) <= TASK_MAX_COUNT:
+        return
+    finished = sorted(
+        (t.get("finished_at") or 0.0, tid)
+        for tid, t in TASKS.items()
+        if t.get("status") in ("done", "error")
+    )
+    overflow = len(TASKS) - TASK_MAX_COUNT
+    for _, tid in finished[:overflow]:
+        TASKS.pop(tid, None)
 
 
 def _to_native(obj):
@@ -167,15 +203,21 @@ def _run_task(
         )
 
         with TASKS_LOCK:
-            TASKS[task_id]["result"] = payload
-            TASKS[task_id]["status"] = "done"
+            task = TASKS.get(task_id)
+            if task is not None:
+                task["result"] = payload
+                task["status"] = "done"
+                task["finished_at"] = time.time()
     except Exception as e:
         import traceback
 
         traceback.print_exc()
         with TASKS_LOCK:
-            TASKS[task_id]["error"] = str(e)
-            TASKS[task_id]["status"] = "error"
+            task = TASKS.get(task_id)
+            if task is not None:
+                task["error"] = str(e)
+                task["status"] = "error"
+                task["finished_at"] = time.time()
     finally:
         # 恢复默认
         for k, v in backup.items():
@@ -256,6 +298,7 @@ def predict():
         # 3) 创建任务
         task_id = str(uuid.uuid4())[:12]
         with TASKS_LOCK:
+            _cleanup_tasks_locked()  # ← 惰性清理 + 上限兜底
             TASKS[task_id] = {
                 "status": "running",
                 "progress": {
@@ -266,6 +309,8 @@ def predict():
                 },
                 "result": None,
                 "error": None,
+                "created_at": time.time(),  # ← 新增
+                "finished_at": None,  # ← 新增
             }
 
         t = threading.Thread(
@@ -308,6 +353,16 @@ def progress(task_id: str):
         elif task["status"] == "error":
             resp["error"] = task["error"]
         return success(resp)
+
+
+@coefficient_bp.delete("/progress/<task_id>")
+def drop_task(task_id: str):
+    """前端拿到结果后主动清理任务，避免内存长期占用。"""
+    with TASKS_LOCK:
+        existed = TASKS.pop(task_id, None) is not None
+    if not existed:
+        return fail("任务不存在", code=404), 404
+    return success(msg="任务记录已清理")
 
 
 @coefficient_bp.get("/weather-config")

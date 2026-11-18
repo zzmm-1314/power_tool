@@ -1,4 +1,4 @@
-"""负荷 / 光伏数据服务：内存预览优先、业务数据库兜底（仅浙江电网）
+"""负荷 / 光伏数据服务：「业务数据库（江苏库优先、浙江库兜底）」（仅浙江电网）
 
 上传入口解析 Excel 后同时写入内存预览与 tmp_curve_data 表，
 本模块读取时同一维度以预览为准，因此刚上传即可显示。
@@ -8,7 +8,6 @@ from typing import Dict
 from datetime import datetime, timedelta
 from services.bid_space_service import fetch_load, fetch_pv
 from services.db_store import fetch_load_pv, clear_load_pv
-from services.database_provider import fetch_series
 from services.load_parser import TARGET_DEVICE
 from services.constants import DataSource
 
@@ -34,9 +33,6 @@ def _iterate_date_range(start_date: str, end_date: str, max_days: int = 60):
 
 
 def _merge_source(sources: set) -> str:
-    """预览优先：只要有来自内存预览的数据就标记为 preview"""
-    if DataSource.PREVIEW in sources:
-        return DataSource.PREVIEW
     if DataSource.DB in sources:
         return DataSource.DB
     return DataSource.EMPTY

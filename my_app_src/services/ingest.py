@@ -53,11 +53,6 @@ def store_points(
             pass
         return {"preview": len(points), "saved": True, "dbError": ""}
 
-    # 2. 写入内存预览（一定成功）
-    preview_count = preview_store.replace_points(
-        data_type, sub_type, device, date, points, source_file=source_file
-    )
-
     # 3. 写入浙江临时库
     saved = False
     db_error = ""

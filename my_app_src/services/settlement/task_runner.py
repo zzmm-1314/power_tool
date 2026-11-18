@@ -82,6 +82,7 @@ def run_task(task_id: str, task_type: str, params: dict):
                     float(params["tenday_late"]),
                 ],
                 selected_dates=params.get("selected_dates") or [],
+                declaration_file=params.get("declaration_file") or None,
                 log_func=log_func,
                 progress_func=progress_func,
             )

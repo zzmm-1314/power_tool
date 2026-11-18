@@ -12,32 +12,10 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from services.constants import DataSource
-from services.db_store import fetch_items as db_fetch_items
 
 
 def _key(rec: Dict) -> tuple:
     return (rec.get("date", ""), rec.get("device", ""), rec.get("kind", ""))
-
-
-def fetch_series(
-    data_type: str,
-    sub_type: str = "",
-    date: Optional[str] = None,
-    device: Optional[str] = None,
-) -> List[Dict]:
-    """读取曲线数据（预览覆盖数据库）
-
-    返回 [{"date","device","kind","points","source"}]，无数据时返回空列表。
-    """
-    db_rows = db_fetch_items(data_type, sub_type, date, device)
-    for r in db_rows:
-        r.setdefault("source", SOURCE_DB)
-
-    merged: Dict[tuple, Dict] = {_key(r): r for r in db_rows}
-    for r in preview_store.fetch_items(data_type, sub_type, date, device):
-        merged[_key(r)] = r
-
-    return list(merged.values())
 
 
 def fetch_record(

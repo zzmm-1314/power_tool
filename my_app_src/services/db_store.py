@@ -141,6 +141,7 @@ _DDL_TEMPLATES = {
             `month` varchar(20) NOT NULL,
             `official_price` decimal(18, 6) DEFAULT NULL,
             `diff_amount` decimal(18, 6) DEFAULT NULL,
+            `simulated_fee` decimal(18, 6) DEFAULT NULL,   -- ← 新增
             `uploaded_at` datetime NOT NULL,
             PRIMARY KEY (`id`),
             UNIQUE KEY `idx_node_month` (`node_name`, `month`)
@@ -265,139 +266,6 @@ def ensure_table(table_name: str) -> bool:
         logger.warning(f"[DbStore] 初始化表 {table_name} 失败: {e}")
         _mark_db_failed(str(e))
     return _table_ready.get(table_name, False)
-
-
-def replace_points(
-    data_type: str,
-    sub_type: str,
-    device: str,
-    date: str,
-    points: List[Dict],
-    source_file: str = "",
-) -> int:
-    table_name = _get_table_name(data_type, sub_type)
-    if not ensure_table(table_name):
-        raise RuntimeError(_skip_reason())
-
-    has_unit = table_name in ("tmp_day_ahead_plant", "tmp_spread_plant")
-    has_kind = table_name in ("tmp_load", "tmp_pv")
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    rows = []
-    for i, pt in enumerate(points or []):
-        t = str(pt.get("time") or "").strip()
-        if not t:
-            continue
-        v = pt.get("value")
-        try:
-            v = float(v) if v is not None else None
-        except (TypeError, ValueError):
-            v = None
-
-        if has_unit and has_kind:
-            rows.append((date, device or "", t, v, sub_type or "", i, source_file, now))
-        elif has_unit:
-            rows.append((date, device or "", t, v, i, source_file, now))
-        elif has_kind:
-            rows.append((date, t, v, sub_type or "", i, source_file, now))
-        else:
-            rows.append((date, t, v, i, source_file, now))
-
-    del_sql = f"DELETE FROM {table_name} WHERE `date`=%s"
-    del_params = [date]
-    if has_unit:
-        del_sql += " AND unit_name=%s"
-        del_params.append(device or "")
-    if has_kind:
-        del_sql += " AND kind=%s"
-        del_params.append(sub_type or "")
-
-    if has_unit and has_kind:
-        ins_sql = f"INSERT INTO {table_name} (`date`, unit_name, time_label, value, kind, seq, source_file, uploaded_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
-    elif has_unit:
-        ins_sql = f"INSERT INTO {table_name} (`date`, unit_name, time_label, value, seq, source_file, uploaded_at) VALUES (%s,%s,%s,%s,%s,%s,%s)"
-    elif has_kind:
-        ins_sql = f"INSERT INTO {table_name} (`date`, time_label, value, kind, seq, source_file, uploaded_at) VALUES (%s,%s,%s,%s,%s,%s,%s)"
-    else:
-        ins_sql = f"INSERT INTO {table_name} (`date`, time_label, value, seq, source_file, uploaded_at) VALUES (%s,%s,%s,%s,%s,%s)"
-
-    try:
-        conn = get_db_conn()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(del_sql, del_params)
-                if rows:
-                    cursor.executemany(ins_sql, rows)
-            _mark_db_ok()
-        finally:
-            conn.close()
-    except Exception as e:
-        _mark_db_failed(str(e))
-        raise
-    return len(rows)
-
-
-def fetch_items(
-    data_type: str,
-    sub_type: Optional[str] = None,
-    date: Optional[str] = None,
-    device: Optional[str] = None,
-) -> List[Dict]:
-    if not _db_available():
-        return []
-
-    table_name = _get_table_name(data_type, sub_type or "")
-    if not ensure_table(table_name):
-        return []
-
-    has_unit = table_name in ("tmp_day_ahead_plant", "tmp_spread_plant")
-    has_kind = table_name in ("tmp_load", "tmp_pv")
-
-    sql = f"SELECT `date`, time_label, value"
-    if has_unit:
-        sql += ", unit_name"
-    if has_kind:
-        sql += ", kind"
-    sql += f" FROM {table_name} WHERE 1=1"
-    args = []
-
-    if date:
-        sql += " AND `date`=%s"
-        args.append(date)
-    if has_unit and device:
-        sql += " AND unit_name=%s"
-        args.append(device)
-    if has_kind and sub_type:
-        sql += " AND kind=%s"
-        args.append(sub_type)
-    sql += " ORDER BY id"
-
-    try:
-        conn = get_db_conn()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(sql, args)
-                rows = cursor.fetchall()
-        finally:
-            conn.close()
-        _mark_db_ok()
-    except Exception as e:
-        logger.warning(f"[DbStore] 查询失败（{table_name}）: {e}")
-        _mark_db_failed(str(e))
-        return []
-
-    grouped: Dict[tuple, Dict] = {}
-    for r in rows:
-        d = r["date"]
-        dev = r.get("unit_name", device or "")
-        k = r.get("kind", sub_type or "")
-        key = (d, dev, k)
-        item = grouped.setdefault(
-            key,
-            {"date": d, "device": dev, "kind": k, "points": []},
-        )
-        item["points"].append({"time": r["time_label"], "value": r["value"]})
-    return list(grouped.values())
 
 
 # ================= 新增写入函数 =================

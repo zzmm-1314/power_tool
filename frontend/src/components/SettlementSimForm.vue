@@ -15,26 +15,20 @@
                 </select>
             </div>
 
-            <div v-if="config.showFixedFile" class="form-row">
-                <label>固定申报功率</label>
-                <PathInput v-model="form.fixed_file" type="file" placeholder="固定申报功率 .xlsx" />
-            </div>
-
             <div class="form-row">
                 <label>目标文件</label>
                 <PathInput v-model="form.target_file" type="file" placeholder="模拟结算单模板 .xlsx" />
             </div>
+
+            <!-- ⭐ 申报电量：与目标文件一致，选路径即可 -->
             <div v-if="config.showDeclaration" class="form-row">
-                <label>48点申报电量</label>
-                <div style="flex:1;">
-                    <textarea v-model="declarationStr" class="input textarea"
-                        placeholder="请粘贴 48 个数字（逗号或空格分隔），或者上传一个文件解析" rows="2"
-                        style="width: 100%; height: auto; padding: 6px;"></textarea>
-                    <div style="margin-top: 4px;">
-                        <input type="file" accept=".xlsx,.xls" @change="handleDeclarationFile" class="file-input" />
-                    </div>
-                </div>
+                <label>申报电量文件</label>
+                <PathInput v-model="form.declaration_file" type="file" placeholder="48点申报电量 .xlsx（可留空，留空则全部按 0 处理）" />
+                <button type="button" class="btn-download-decl" @click="downloadDeclarationTemplate">
+                    📥 下载模板
+                </button>
             </div>
+
             <div class="form-row">
                 <label>合约总电量</label>
                 <div class="tenday-row" style="flex-wrap: wrap; gap: 10px;">
@@ -107,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import PathInput from '@/components/PathInput.vue'
 import DateRangeInput from '@/components/DateRangeInput.vue'
@@ -118,9 +112,9 @@ import { expandDateRange } from '@/utils/dateRange'
 import { startSettlementTask, type TaskInfo } from '@/api/modules/settlement'
 import type { SettlementSimConfig } from './settlement-sim-types'
 import { useRouter } from 'vue-router'
-import { request } from '@/api/request' // 确保路径正确
-const declarationStr = ref('')
-const declarationData = ref<number[]>([])
+import { request } from '@/api/request'
+import { apiUrl } from '@/utils/apiBase'
+
 const props = defineProps<{ config: SettlementSimConfig }>()
 
 const nodes = ref<string[]>([])
@@ -130,11 +124,12 @@ const taskId = ref<string | null>(null)
 const msg = ref('')
 const msgType = ref<'ok' | 'err'>('ok')
 const router = useRouter()
-const hasCurve = ref(true) // 默认设为 true，防止网络慢时误拦截
+const hasCurve = ref(true)
+
 const form = reactive({
     yearSource: 'decompose',
-    fixed_file: '',
     target_file: '',
+    declaration_file: '',   // ⭐ 新增：申报电量 Excel 路径
     annual_price: 0,
     monthly_price: 0,
     tenday_early: 0,
@@ -148,8 +143,9 @@ const form = reactive({
     dateStart: '',
     dateEnd: '',
 })
+
 onMounted(async () => {
-    checkConfigStatus() // ⭐ 加入这一行
+    checkConfigStatus()
     try {
         const list = await listPlantNodes()
         nodes.value = list.map(n => n.name)
@@ -157,6 +153,7 @@ onMounted(async () => {
         nodes.value = []
     }
 })
+
 async function checkConfigStatus() {
     try {
         const res = await request<{ has_curve: boolean, has_holiday: boolean }>({
@@ -167,6 +164,10 @@ async function checkConfigStatus() {
     } catch (e) {
         console.warn('检查基础配置状态失败', e)
     }
+}
+
+function downloadDeclarationTemplate() {
+    window.open(apiUrl('/settlement/declaration-template'), '_blank')
 }
 
 async function submit() {
@@ -187,11 +188,6 @@ async function submit() {
         msgType.value = 'err'
         return
     }
-    if (props.config.showFixedFile && !form.fixed_file) {
-        msg.value = '请填写固定申报功率'
-        msgType.value = 'err'
-        return
-    }
     if (!form.dateStart || !form.dateEnd) {
         msg.value = '请先选择日期范围'
         msgType.value = 'err'
@@ -205,7 +201,7 @@ async function submit() {
             start_date: form.dateStart,
             end_date: form.dateEnd,
             target_file: form.target_file,
-            fixed_file: form.fixed_file,
+            declaration_file: form.declaration_file,   // ⭐ 新增
             year_source: form.yearSource,
             annual_price: form.annual_price,
             monthly_price: form.monthly_price,
@@ -218,7 +214,6 @@ async function submit() {
             qty_tenday2: form.qty_tenday2,
             qty_tenday3: form.qty_tenday3,
             selected_dates: expandDateRange(form.dateStart, form.dateEnd),
-            declaration_data: declarationData.value // ⭐ 修复：将申报电量塞入请求
         }
 
         const res = await startSettlementTask('simulate', payload)
@@ -237,22 +232,9 @@ function onFinished(task: TaskInfo) {
     msg.value = task.status === 'completed' ? '✅ 完成' : '❌ 失败，请查看日志'
     msgType.value = task.status === 'completed' ? 'ok' : 'err'
 }
-// 上传解析
-async function handleDeclarationFile(e: Event) {
-    // ... 通过 xlsx 或简单读取文本
-    // 为了简单，可要求用户直接粘贴
-}
-// 解析输入框
-watch(declarationStr, (val) => {
-    if (!val.trim()) { declarationData.value = []; return }
-    const nums = val.split(/[\s,，]+/).map(Number).filter(n => !isNaN(n))
-    if (nums.length === 48) declarationData.value = nums
-    else declarationData.value = []
-})
 </script>
 
 <style scoped>
-/* 从 JiaojiangSim.vue / generalSim.vue 合并，去掉重复 */
 .form-card {
     background: #fff;
     border-radius: 6px;
@@ -348,6 +330,24 @@ watch(declarationStr, (val) => {
     background: #a0b4d8;
     color: #fff;
     cursor: not-allowed;
+}
+
+.btn-download-decl {
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    background: #fff;
+    color: #606266;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-download-decl:hover {
+    border-color: #2d6cdf;
+    color: #2d6cdf;
 }
 
 .msg {

@@ -1,11 +1,15 @@
+/// <reference types="vite/client" />
+
 /**
  * 统一 API 基址：
- * - 未设置 VITE_API_BASE_URL 时使用 /api（走 Vite/生产代理）
- * - 设置后（如 https://api.example.com）所有请求统一拼接
+ * - 优先 VITE_API_BASE_URL
+ * - 未设置时跟随 Vite base（生产 base 为 /zjPowerTool/ → /zjPowerTool/api）
  */
 export function apiBase(): string {
     const raw = (import.meta.env.VITE_API_BASE_URL || '').trim()
-    if (!raw) return '/api'
+    if (!raw) {
+        return `${import.meta.env.BASE_URL}api`.replace(/\/{2,}/g, '/')
+    }
     return raw.replace(/\/+$/, '')
 }
 

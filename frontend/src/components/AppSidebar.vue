@@ -1,33 +1,53 @@
 <template>
-    <aside class="app-sidebar scroll-y" :class="{ collapsed }">
-        <nav class="menu">
-            <template v-for="(item, idx) in menus" :key="item.title">
-                <!-- 无子菜单 -->
-                <router-link v-if="!item.children" :to="item.path!" class="menu-item" active-class="active">
-                    {{ item.title }}
-                </router-link>
+    <aside class="app-sidebar" :class="{ collapsed }">
+        <!-- ===== 折叠态：书签列表 ===== -->
+        <div v-if="collapsed" class="bookmarks">
+            <div v-for="(item, idx) in menus" :key="item.title" class="bookmark" :title="item.title"
+                @click="expandTo(idx)">
+                <span class="bookmark-text">{{ item.title }}</span>
+            </div>
+        </div>
 
-                <!-- 折叠框 -->
-                <div v-else class="menu-group">
-                    <div class="menu-item group-title" @click="toggle(idx)">
-                        <span>{{ item.title }}</span>
-                        <span class="arrow" :class="{ open: opened.includes(idx) }">▾</span>
-                    </div>
+        <!-- ===== 展开态：完整菜单 ===== -->
+        <template v-else>
+            <div class="sidebar-header">
+                <span class="logo">⚡</span>
+                <span class="sidebar-title">电力工具助手</span>
+                <button class="collapse-btn" title="收起侧栏" @click="appStore.toggleSidebar()">
+                    ⏴
+                </button>
+            </div>
 
-                    <div v-show="opened.includes(idx)" class="submenu">
-                        <router-link v-for="child in item.children" :key="child.path" :to="child.path"
-                            class="menu-item sub-item" active-class="active">
-                            {{ child.title }}
-                        </router-link>
+            <nav class="menu scroll-y">
+                <template v-for="(item, idx) in menus" :key="item.title">
+                    <!-- 无子菜单 -->
+                    <router-link v-if="!item.children" :to="item.path!" class="menu-item" active-class="active">
+                        {{ item.title }}
+                    </router-link>
+
+                    <!-- 分组菜单 -->
+                    <div v-else class="menu-group">
+                        <div class="menu-item group-title" @click="toggle(idx)">
+                            <span>{{ item.title }}</span>
+                            <span class="arrow" :class="{ open: opened.includes(idx) }">▾</span>
+                        </div>
+
+                        <div v-show="opened.includes(idx)" class="submenu">
+                            <router-link v-for="child in item.children" :key="child.path" :to="child.path"
+                                class="menu-item sub-item" active-class="active">
+                                {{ child.title }}
+                            </router-link>
+                        </div>
                     </div>
-                </div>
-            </template>
-        </nav>
+                </template>
+            </nav>
+        </template>
     </aside>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useAppStore } from '@/stores/app'
 
 interface MenuChild {
     title: string
@@ -39,7 +59,8 @@ interface MenuItem {
     children?: MenuChild[]
 }
 
-defineProps<{ collapsed?: boolean }>()
+const appStore = useAppStore()
+const collapsed = computed(() => appStore.sidebarCollapsed)
 
 const menus: MenuItem[] = [
     { title: '负荷分析', path: '/load-analysis' },
@@ -70,11 +91,10 @@ const menus: MenuItem[] = [
     {
         title: '结算单查询与下载',
         children: [
-            { title: "电价对比", path: '/settlement/price-compare' },
+            { title: '电价对比', path: '/settlement/price-compare' },
             { title: '实际结算单更新', path: '/settlement/actual' },
         ],
     },
-    // ⭐ 工具助手新增了原本的结算单更新子项及申报系数预测
     {
         title: '工具助手',
         children: [
@@ -87,37 +107,99 @@ const menus: MenuItem[] = [
     },
     { title: '滚撮分析', path: '/rolling' },
     { title: '统调电厂', path: '/unified-plants' },
-
 ]
 
-/** 默认展开所有折叠框 */
-const opened = ref<number[]>(menus.map((m, i) => (m.children ? i : -1)).filter((i) => i >= 0))
+/** 默认展开所有分组 */
+const opened = ref<number[]>(
+    menus.map((m, i) => (m.children ? i : -1)).filter((i) => i >= 0),
+)
 
 function toggle(idx: number) {
     const pos = opened.value.indexOf(idx)
     if (pos > -1) opened.value.splice(pos, 1)
     else opened.value.push(idx)
 }
+
+/** 点击书签：展开侧边栏；若为分组，确保该组展开 */
+function expandTo(idx: number) {
+    appStore.toggleSidebar()
+    const item = menus[idx]
+    if (item.children && !opened.value.includes(idx)) {
+        opened.value.push(idx)
+    }
+}
 </script>
 
 <style scoped>
 .app-sidebar {
     width: 210px;
-    /* 稍微加宽一点点 */
+    flex-shrink: 0;
     background: #fff;
     border-right: 1px solid #ebeef5;
-    transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     box-shadow: 1px 0 8px rgba(0, 0, 0, 0.02);
+    display: flex;
+    flex-direction: column;
+    transition: width 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
+    overflow: hidden;
 }
 
 .app-sidebar.collapsed {
-    width: 0;
+    width: 40px;
     overflow: hidden;
-    border-right: none;
 }
 
+/* ===== 展开态头部 ===== */
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 52px;
+    padding: 0 10px 0 16px;
+    border-bottom: 1px solid #f0f2f5;
+    flex-shrink: 0;
+}
+
+.logo {
+    font-size: 18px;
+}
+
+.sidebar-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2d3d;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #909399;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.collapse-btn:hover {
+    background: #ecf3ff;
+    color: #2d6cdf;
+}
+
+/* ===== 展开态菜单 ===== */
 .menu {
+    flex: 1;
     padding: 12px 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .menu-item {
@@ -130,31 +212,30 @@ function toggle(idx: number) {
     font-size: 14px;
     text-decoration: none;
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: 6px;
     transition: background 0.2s ease, color 0.2s ease;
 }
 
 .menu-item:hover {
-    background: var(--bg-subtle);
-    color: var(--text-1);
+    background: #f0f2f5;
+    color: #1f2d3d;
 }
 
-/* 统一激活态：左侧高亮竖条 + 浅色底（原先两段 .menu-item.active 相互覆盖，已合并） */
 .menu-item.active {
-    background: var(--primary-light);
-    color: var(--primary);
+    background: #ecf3ff;
+    color: #2d6cdf;
     font-weight: 600;
-    box-shadow: inset 3px 0 0 0 var(--primary);
+    box-shadow: inset 3px 0 0 0 #2d6cdf;
 }
 
 .group-title {
     font-weight: 500;
-    color: var(--text-2);
+    color: #303133;
 }
 
 .arrow {
     font-size: 12px;
-    color: var(--text-4);
+    color: #909399;
     transition: transform 0.2s;
     transform: rotate(-90deg);
 }
@@ -171,13 +252,59 @@ function toggle(idx: number) {
 .sub-item {
     padding-left: 32px;
     font-size: 13px;
-    color: var(--text-3);
+    color: #606266;
 }
 
 .sub-item.active {
-    color: var(--primary);
+    color: #2d6cdf;
     font-weight: 500;
     background: transparent;
-    box-shadow: inset 2px 0 0 0 var(--primary);
+    box-shadow: inset 2px 0 0 0 #2d6cdf;
+}
+
+/* ===== 折叠态：书签 ===== */
+.bookmarks {
+    height: 100%;
+    padding: 10px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+}
+
+.bookmarks::-webkit-scrollbar {
+    display: none;
+}
+
+.bookmark {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    padding: 12px 5px;
+    background: #f5f7fa;
+    color: #4a5568;
+    font-size: 12px;
+    line-height: 1;
+    letter-spacing: 2px;
+    border-left: 3px solid transparent;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    user-select: none;
+    max-height: 180px;
+    overflow: hidden;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.bookmark:hover {
+    background: #ecf3ff;
+    color: #2d6cdf;
+    border-left-color: #2d6cdf;
+}
+
+.bookmark-text {
+    display: block;
+    white-space: nowrap;
 }
 </style>

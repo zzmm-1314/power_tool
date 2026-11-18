@@ -10,9 +10,9 @@
 
 from datetime import datetime
 from typing import Dict, List, Optional
-from services.bid_space_service import fetch_day_ahead_range, fetch_realtime_range
 from services.db_store import fetch_price_range, clear_price
 from utils.logger import get_logger
+from services.bid_space_service import fetch_day_ahead_range, fetch_realtime_range
 
 logger = get_logger("services.settlement.builder")
 # ============================================================
@@ -97,7 +97,6 @@ def prepare_common(
     y, m = start_date.year, start_date.month
 
     # 延迟导入避免与 api / contract_service 形成循环
-    from services.bid_space_service import fetch_day_ahead_range, fetch_realtime_range
     from services.db_store import fetch_contract_data
     from services.contract_service import generate_contract_decomposition
 

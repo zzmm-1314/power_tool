@@ -8,10 +8,9 @@ import type { SettlementSimConfig } from '@/components/settlement-sim-types'
 
 const config: SettlementSimConfig = {
     title: '结算单更新 · 模拟结算单',
-    taskType: 'simulate', // ⭐ 统一为 simulate
+    taskType: 'simulate',
     showYearSource: true,
-    showFixedFile: true, // ⭐ 保留固定申报功率
-    showMonthlyPrice: true, // ⭐ 通用模拟单需要月度电价
+    showMonthlyPrice: true,
     showDeclaration: true,
 }
 </script>

@@ -91,6 +91,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import { request } from '@/api/request'
 import { useRouter } from 'vue-router'
+import { apiUrl } from '@/utils/apiBase'
 const router = useRouter()
 const loading = ref(false)
 const exporting = ref(false)
@@ -187,13 +188,10 @@ async function loadData() {
 async function exportData() {
     if (!resultData.value) return
     try {
-        const res = await fetch('/api/contract/export', {
+        const res = await fetch(apiUrl('/contract/export'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                resultData: resultData.value,
-                times: times.value,
-            }),
+            body: JSON.stringify({ resultData: resultData.value, times: times.value }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const blob = await res.blob()

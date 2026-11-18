@@ -1,4 +1,5 @@
 import { request } from '../request'
+import { apiUrl } from '@/utils/apiBase'
 
 export interface UnifiedPlantRow {
     id: number;
@@ -121,6 +122,5 @@ export function deleteUnifiedPlantsBatch(ids: number[]) {
 }
 
 export function downloadUnifiedPlantsTemplate() {
-    // 文件下载直连后端（不走 axios 拦截器）
-    window.open(`${import.meta.env.VITE_API_BASE_URL || '/api'}/unified-plants/template`, '_blank')
+    window.open(apiUrl('/unified-plants/template'), '_blank')
 }

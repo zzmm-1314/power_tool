@@ -8,12 +8,12 @@ from services.day_ahead_parser import (
 )
 from services.day_ahead_service import (
     SLOT_TIMES,
-    DataSource,
     _merge_source,
     load_items,
     load_unified_items,
     load_node_items,
 )
+from services.constants import DataSource
 
 
 def load_spread_unified_items(start_date=None, end_date=None) -> List[Dict]:

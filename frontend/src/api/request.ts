@@ -4,7 +4,8 @@ import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import type { ApiResult } from '@/types'
 
 const service: AxiosInstance = axios.create({
-    baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+    // 优先环境变量；否则跟随 Vite base（生产为 /zjPowerTool/，得到 /zjPowerTool/api）
+    baseURL: import.meta.env.VITE_API_BASE_URL || `${import.meta.env.BASE_URL}api`,
     timeout: 30000,
 })
 service.interceptors.response.use(

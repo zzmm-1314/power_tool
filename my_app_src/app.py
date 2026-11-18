@@ -120,6 +120,9 @@ def start_watchdog(grace_period=15, timeout=30):
     """
     global LAST_HEARTBEAT_TIME
     LAST_HEARTBEAT_TIME = time.time() + grace_period
+    if os.getenv("POWER_TOOL_WATCHDOG", "1").strip() == "0":
+        logger.info("watchdog 已通过 POWER_TOOL_WATCHDOG=0 关闭（服务器部署）")
+        return
 
     def _watchdog_loop():
         global LAST_HEARTBEAT_TIME
@@ -150,7 +153,7 @@ def create_app() -> Flask:
 
     register_blueprints(app)
     register_heartbeat(app)
-    if IS_PROD:  # 只在生产模式启用，避免开发时调 Vite 刷新几秒无心跳就被杀
+    if IS_PROD and os.getenv("POWER_TOOL_WATCHDOG", "1").strip() != "0":
         start_watchdog(grace_period=20, timeout=60)
     index_html = STATIC_DIR / "index.html"
     static_ready = index_html.is_file()

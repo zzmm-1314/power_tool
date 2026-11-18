@@ -97,21 +97,6 @@ def compute_expectation_coefficient(
             "coefficient": 1.0,
         }
     weights = weights / weight_sum
-    if len(values) == 0:
-        return {
-            "sample_days": 0,
-            "effective_sample_size": 0.0,
-            "positive_rate": 0.5,
-            "weighted_mean_gap": 0.0,
-            "positive_gain": 0.0,
-            "negative_risk": 0.0,
-            "coefficient": 1.0,
-        }
-
-    # 指数衰减权重（越近权重越大）
-    ages = np.maximum((reference_date - dates).dt.days.to_numpy(dtype=float), 0)
-    weights = np.power(0.5, ages / half_life)
-    weights = weights / weights.sum()
 
     # 预处理价差
     adjusted_values = apply_gap_processing(values, hard_cap=hard_cap)
