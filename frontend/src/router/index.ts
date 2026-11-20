@@ -88,16 +88,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '结算单更新 / 模拟结算单' },
       },
       {
-        path: 'monthly-report',
+        path: 'tools/monthly-report',
         name: 'MonthlyReport',
-        component: () => import('@/views/monthly-report/index.vue'),
-        meta: { title: '月报数据部分填充' },
+        component: () => import('@/views/tools/monthly-report/index.vue'),
+        meta: { title: '工具助手 / 月报数据部分填充' },
       },
       {
-        path: 'monthly-extract',
+        path: 'tools/monthly-extract',
         name: 'MonthlyExtract',
-        component: () => import('@/views/monthly-report/PdfExtract.vue'),
-        meta: { title: '结算单 PDF 数据提取' },
+        component: () => import('@/views/tools/monthly-report/PdfExtract.vue'),
+        meta: { title: '工具助手 / 结算单 PDF 数据提取' },
       },
       // 工具助手
       {
@@ -107,9 +107,9 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '工具助手 / 文档逐字比对' },
       },
       {
-        path: 'contract/config', // 原来是 settings/contract-config
+        path: 'contract/config',
         name: 'ContractConfig',
-        component: () => import('@/views/settings/ContractConfig.vue'), // 可以移动文件位置
+        component: () => import('@/views/contract/ContractConfig.vue'),  // ← 原 @/views/settings/
         meta: { title: '中长期合约 / 合约配置' },
       },
       {
@@ -119,10 +119,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '统调电厂' },
       },
       {
-        path: 'coefficient',
+        path: 'tools/coefficient',
         name: 'Coefficient',
-        component: () => import('@/views/coefficient/index.vue'),
-        meta: { title: '申报系数预测' },
+        component: () => import('@/views/tools/coefficient/index.vue'),
+        meta: { title: '工具助手 / 申报系数预测' },
       },
       {
         path: 'rolling',

@@ -9,6 +9,59 @@ from utils.response import success, fail
 
 settlement_bp = Blueprint("settlement", __name__)
 
+# 合约电量五个组成部分
+_CONTRACT_PARTS = ("year", "month", "tenday1", "tenday2", "tenday3")
+
+
+def _as_bool(value) -> bool:
+    """开关值转布尔：兼容 true/"true"/1/"on" 等写法"""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _is_decompose(value) -> bool:
+    """判断某项是否为「调用合约分解」。
+
+    同时接受布尔值/0-1 与 'decompose' 字符串（前端直接传来源名）。
+    """
+    if isinstance(value, str) and value.strip().lower() in ("decompose", "database"):
+        return value.strip().lower() == "decompose"
+    return _as_bool(value)
+
+
+def _parse_contract_sources(params: dict) -> dict:
+    """解析五项合约电量开关 → {'year': 'decompose'|'database', ...}
+
+    勾选（True）表示调用合约分解接口，未勾选表示取数据库已录入。
+    兼容两种传参：
+    - contract_sources: {"year": true, "month": false, ...}
+    - 扁平字段 contract_year / contract_month / contract_tenday1/2/3
+    兼容旧参数 year_source：仍按原值决定五项（仅在未传新开关时生效）。
+    """
+    nested = params.get("contract_sources") or params.get("contractSources")
+    nested = nested if isinstance(nested, dict) else {}
+
+    legacy = params.get("year_source") or params.get("yearSource")
+    legacy_default = (
+        None if legacy is None else ("decompose" if legacy == "decompose" else "database")
+    )
+
+    sources = {}
+    for part in _CONTRACT_PARTS:
+        raw = nested.get(part)
+        if raw is None:
+            raw = params.get(f"contract_{part}")
+        if raw is None:
+            sources[part] = legacy_default or "database"
+        else:
+            sources[part] = "decompose" if _is_decompose(raw) else "database"
+    return sources
+
 
 @settlement_bp.post("/start/<task_type>")
 def start(task_type: str):
@@ -32,7 +85,8 @@ def start(task_type: str):
         if not node_name or not start_date or not end_date:
             return fail("需要参数 node_name, start_date, end_date")
         try:
-            year_source = params.get("year_source", "decompose")
+            # 五项合约电量开关：勾选=调用合约分解接口，未勾选=取数据库
+            contract_sources = _parse_contract_sources(params)
             # 调用通用引擎
             gen_data = build_general_data(
                 node_name,
@@ -43,7 +97,7 @@ def start(task_type: str):
                 qty_tenday1,
                 qty_tenday2,
                 qty_tenday3,
-                year_source=year_source,
+                contract_sources=contract_sources,
             )
             # 将数据塞入 params，供 sim_v2 渲染
             params["spot_data"] = gen_data["spot"]

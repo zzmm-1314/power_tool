@@ -1,10 +1,10 @@
 <template>
     <aside class="app-sidebar" :class="{ collapsed }">
-        <!-- ===== 折叠态：书签列表 ===== -->
+        <!-- ===== 折叠态：图标书签 ===== -->
         <div v-if="collapsed" class="bookmarks">
             <div v-for="(item, idx) in menus" :key="item.title" class="bookmark" :title="item.title"
                 @click="expandTo(idx)">
-                <span class="bookmark-text">{{ item.title }}</span>
+                <span class="bookmark-icon">{{ item.icon }}</span>
             </div>
         </div>
 
@@ -22,13 +22,15 @@
                 <template v-for="(item, idx) in menus" :key="item.title">
                     <!-- 无子菜单 -->
                     <router-link v-if="!item.children" :to="item.path!" class="menu-item" active-class="active">
-                        {{ item.title }}
+                        <span class="menu-icon">{{ item.icon }}</span>
+                        <span class="menu-text">{{ item.title }}</span>
                     </router-link>
 
                     <!-- 分组菜单 -->
                     <div v-else class="menu-group">
                         <div class="menu-item group-title" @click="toggle(idx)">
-                            <span>{{ item.title }}</span>
+                            <span class="menu-icon">{{ item.icon }}</span>
+                            <span class="menu-text">{{ item.title }}</span>
                             <span class="arrow" :class="{ open: opened.includes(idx) }">▾</span>
                         </div>
 
@@ -55,6 +57,7 @@ interface MenuChild {
 }
 interface MenuItem {
     title: string
+    icon: string
     path?: string
     children?: MenuChild[]
 }
@@ -63,9 +66,10 @@ const appStore = useAppStore()
 const collapsed = computed(() => appStore.sidebarCollapsed)
 
 const menus: MenuItem[] = [
-    { title: '负荷分析', path: '/load-analysis' },
+    { title: '负荷分析', icon: '📊', path: '/load-analysis' },
     {
         title: '日前电价',
+        icon: '💰',
         children: [
             { title: '统一结算点', path: '/day-ahead-price/unified' },
             { title: '电厂节点', path: '/day-ahead-price/plant' },
@@ -73,6 +77,7 @@ const menus: MenuItem[] = [
     },
     {
         title: '价差分析',
+        icon: '📈',
         children: [
             { title: '统一结算点', path: '/price-spread/unified' },
             { title: '电厂节点', path: '/price-spread/plant' },
@@ -80,6 +85,7 @@ const menus: MenuItem[] = [
     },
     {
         title: '中长期合约',
+        icon: '📋',
         children: [
             { title: '合约分解', path: '/contract/decomposition' },
             { title: '电厂合约仓位', path: '/contract/position' },
@@ -90,6 +96,7 @@ const menus: MenuItem[] = [
     },
     {
         title: '结算单查询与下载',
+        icon: '🧾',
         children: [
             { title: '电价对比', path: '/settlement/price-compare' },
             { title: '实际结算单更新', path: '/settlement/actual' },
@@ -97,16 +104,17 @@ const menus: MenuItem[] = [
     },
     {
         title: '工具助手',
+        icon: '🛠️',
         children: [
-            { title: '月报数据部分填充', path: '/monthly-report' },
-            { title: '结算单 PDF 提取', path: '/monthly-extract' },
+            { title: '月报数据部分填充', path: '/tools/monthly-report' },   // ← 原 /monthly-report
+            { title: '结算单 PDF 提取', path: '/tools/monthly-extract' },   // ← 原 /monthly-extract
             { title: '文档逐字比对', path: '/tools/doc-compare' },
             { title: '模拟结算单更新', path: '/settlement/simulate' },
-            { title: '申报系数预测', path: '/coefficient' },
+            { title: '申报系数预测', path: '/tools/coefficient' },          // ← 原 /coefficient
         ],
     },
-    { title: '滚撮分析', path: '/rolling' },
-    { title: '统调电厂', path: '/unified-plants' },
+    { title: '滚撮分析', icon: '🔄', path: '/rolling' },
+    { title: '统调电厂', icon: '🏭', path: '/unified-plants' },
 ]
 
 /** 默认展开所有分组 */
@@ -144,7 +152,7 @@ function expandTo(idx: number) {
 }
 
 .app-sidebar.collapsed {
-    width: 40px;
+    width: 56px;
     overflow: hidden;
 }
 
@@ -205,7 +213,7 @@ function expandTo(idx: number) {
 .menu-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     padding: 9px 14px;
     margin-bottom: 3px;
     color: #4a5568;
@@ -228,12 +236,28 @@ function expandTo(idx: number) {
     box-shadow: inset 3px 0 0 0 #2d6cdf;
 }
 
+.menu-icon {
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1;
+}
+
+.menu-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .group-title {
     font-weight: 500;
     color: #303133;
 }
 
 .arrow {
+    flex-shrink: 0;
     font-size: 12px;
     color: #909399;
     transition: transform 0.2s;
@@ -250,7 +274,7 @@ function expandTo(idx: number) {
 }
 
 .sub-item {
-    padding-left: 32px;
+    padding-left: 40px;
     font-size: 13px;
     color: #606266;
 }
@@ -262,13 +286,13 @@ function expandTo(idx: number) {
     box-shadow: inset 2px 0 0 0 #2d6cdf;
 }
 
-/* ===== 折叠态：书签 ===== */
+/* ===== 折叠态：图标书签 ===== */
 .bookmarks {
     height: 100%;
     padding: 10px 0;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: 6px;
     overflow-y: auto;
     overflow-x: hidden;
@@ -280,31 +304,29 @@ function expandTo(idx: number) {
 }
 
 .bookmark {
-    writing-mode: vertical-rl;
-    text-orientation: upright;
-    padding: 12px 5px;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: #f5f7fa;
     color: #4a5568;
-    font-size: 12px;
-    line-height: 1;
-    letter-spacing: 2px;
     border-left: 3px solid transparent;
     border-radius: 0 8px 8px 0;
     cursor: pointer;
     user-select: none;
-    max-height: 180px;
-    overflow: hidden;
-    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
 }
 
 .bookmark:hover {
     background: #ecf3ff;
-    color: #2d6cdf;
     border-left-color: #2d6cdf;
+    transform: translateX(2px);
 }
 
-.bookmark-text {
-    display: block;
-    white-space: nowrap;
+.bookmark-icon {
+    font-size: 18px;
+    line-height: 1;
 }
 </style>

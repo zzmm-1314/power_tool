@@ -1,9 +1,11 @@
 <template>
     <PageContainer title="中长期合约配置">
         <div class="config-container">
-            <!-- 左侧：基础配置（全厂共享） -->
+            <!-- 左侧：基础配置 -->
             <div class="panel panel-left">
                 <div class="section-title">1. 基础配置 (全局共享)</div>
+
+                <AnnualConfigNotice />
 
                 <div class="form-group">
                     <label>典型曲线 (Excel)</label>
@@ -34,7 +36,7 @@
             </div>
 
             <!-- 右侧：节点数据上传 -->
-            <div class="panel panel-right">
+            <div class="panel panel-right scroll-y">
                 <div class="section-title">2. 节点数据配置</div>
 
                 <div class="form-group">
@@ -44,72 +46,105 @@
                     </div>
                 </div>
 
-                <div class="data-grid" v-if="selectedNode">
-                    <!-- 合约类 -->
-                    <div class="upload-item">
-                        <span class="item-title">年度合约电量</span>
-                        <label class="upload-btn"><input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                @change="(e) => handleDataUpload(e, 'year')" /><span class="btn-text">📤
-                                选择文件</span></label>
-                    </div>
-                    <div class="upload-item">
-                        <span class="item-title">月度合约电量</span>
-                        <label class="upload-btn"><input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                @change="(e) => handleDataUpload(e, 'month')" /><span class="btn-text">📤
-                                选择文件</span></label>
-                    </div>
-                    <div class="upload-item">
-                        <span class="item-title">上旬合约电量</span>
-                        <label class="upload-btn"><input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                @change="(e) => handleDataUpload(e, 'tenday1')" /><span class="btn-text">📤
-                                选择文件</span></label>
-                    </div>
-                    <div class="upload-item">
-                        <span class="item-title">中旬合约电量</span>
-                        <label class="upload-btn"><input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                @change="(e) => handleDataUpload(e, 'tenday2')" /><span class="btn-text">📤
-                                选择文件</span></label>
-                    </div>
-                    <div class="upload-item">
-                        <span class="item-title">下旬合约电量</span>
-                        <label class="upload-btn"><input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                @change="(e) => handleDataUpload(e, 'tenday3')" /><span class="btn-text">📤
-                                选择文件</span></label>
-                    </div>
-
-                    <!-- 交易类：单独分组美化 -->
-                    <div class="trade-group">
-                        <div class="trade-title">📦 滚撮交易数据上传</div>
-                        <div class="trade-grid">
-                            <!-- 省内滚撮 -->
+                <div v-if="selectedNode" class="data-groups">
+                    <!-- ===== 组1：合约 & 省内滚撮 ===== -->
+                    <div class="data-group">
+                        <div class="group-header">
+                            <span class="group-title">📋 合约与省内滚撮</span>
+                            <span class="group-hint">作用于「电厂合约仓位」页面</span>
+                        </div>
+                        <div class="group-body">
                             <div class="upload-item">
-                                <span class="item-title">日内滚撮数据</span>
-                                <div class="trade-upload-row" style="flex-wrap: wrap; gap: 8px;">
-                                    <!-- 额外的日期参数 -->
-                                    <input type="date" v-model="rollingOpDate" class="trade-date-input"
-                                        style="width: 130px;" />
+                                <span class="item-title">年度合约电量</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'year')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                            <div class="upload-item">
+                                <span class="item-title">月度合约电量</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'month')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                            <div class="upload-item">
+                                <span class="item-title">上旬合约电量</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'tenday1')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                            <div class="upload-item">
+                                <span class="item-title">中旬合约电量</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'tenday2')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                            <div class="upload-item">
+                                <span class="item-title">下旬合约电量</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'tenday3')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                            <div class="upload-item">
+                                <span class="item-title">省内滚撮数据</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'province_rolling')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
 
-                                    <!-- 文件上传组件 -->
-                                    <div style="flex: 1; min-width: 180px;">
-                                        <UploadFile v-model="rollingFiles" :drag="false" :multiple="true" text="选择滚撮文件"
+                    <!-- ===== 组2：日内单独滚撮 ===== -->
+                    <div class="data-group">
+                        <div class="group-header">
+                            <span class="group-title">🔄 日内单独滚撮</span>
+                            <span class="group-hint">作用于「滚撮收益模拟」页面</span>
+                        </div>
+                        <div class="group-body">
+                            <div class="upload-item" style="grid-column: 1 / -1;">
+                                <span class="item-title">日内滚撮数据（需先选择操作日期）</span>
+                                <div class="trade-upload-row">
+                                    <input type="date" v-model="rollingOpDate" class="trade-date-input"
+                                        style="width: 140px;" />
+                                    <div style="flex: 1; min-width: 200px;">
+                                        <UploadFile v-model="rollingFiles" :multiple="true" text="选择滚撮文件"
                                             :disabled="!rollingOpDate" @change="uploadRollingData" />
                                     </div>
                                 </div>
                             </div>
-                            <!-- 长三角省间滚撮 -->
-                            <div class="upload-item">
-                                <span class="item-title">长三角省间交易</span>
-                                <div class="trade-upload-row">
-                                    <label class="upload-btn" style="width: 100%; margin-top: 4px;">
-                                        <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
-                                            @change="(e) => handleDataUpload(e, 'cross_province')" />
-                                        <span class="btn-text">📤 选择文件上传</span>
-                                    </label>
-                                </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== 组3：长三角省间 ===== -->
+                    <div class="data-group">
+                        <div class="group-header">
+                            <span class="group-title">🌏 长三角省间滚撮</span>
+                            <span class="group-hint">作用于「长三角省间交易收益模拟」页面</span>
+                        </div>
+                        <div class="group-body">
+                            <div class="upload-item" style="grid-column: 1 / -1;">
+                                <span class="item-title">长三角省间交易数据</span>
+                                <label class="upload-btn">
+                                    <input type="file" accept=".xlsx,.xls" multiple class="hidden-input"
+                                        @change="(e) => handleDataUpload(e, 'cross_province')" />
+                                    <span class="btn-text">📤 选择文件</span>
+                                </label>
                             </div>
                         </div>
                     </div>
                 </div>
+
                 <div v-else class="empty-tip">
                     请先在上方选择电厂节点，然后上传相应的数据文件。
                 </div>
@@ -121,31 +156,36 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
-import { listPlantNodes, type PlantNode } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode, type PlantNode } from '@/api/modules/nodes'
 import { request } from '@/api/request'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import UploadFile from '@/components/UploadFile.vue'
+import AnnualConfigNotice from '@/components/AnnualConfigNotice.vue'
 import { apiUrl } from '@/utils/apiBase'
+
 const nodeOptions = ref<PlantNode[]>([])
 const selectedNode = ref('')
-const rollingOpDate = ref('') // 新增
+const rollingOpDate = ref('')
 const baseFiles = ref({ curve: false, holiday: false })
-const dataFiles = ref<Record<string, boolean>>({})
 const rollingFiles = ref<File[]>([])
+
 onMounted(async () => {
     try {
         nodeOptions.value = await listPlantNodes()
     } catch {
         nodeOptions.value = []
     }
-})
-// 控制按钮透明度
-function uploadStyle(dateVal: string) {
-    return {
-        opacity: dateVal ? 1 : 0.5,
-        cursor: dateVal ? 'pointer' : 'not-allowed'
+    // ⭐ 默认使用「全局默认节点」
+    try {
+        const globalNode = await fetchGlobalNode()
+        if (globalNode && nodeOptions.value.some(n => n.name === globalNode)) {
+            selectedNode.value = globalNode
+        }
+    } catch {
+        // ignore
     }
-}
+})
+
 async function handleBaseUpload(e: Event, type: 'curve' | 'holiday') {
     const file = (e.target as HTMLInputElement).files?.[0]
     if (!file) return
@@ -162,7 +202,7 @@ async function handleBaseUpload(e: Event, type: 'curve' | 'holiday') {
         })
         baseFiles.value[type] = true
         alert('保存基础配置成功')
-    } catch (err) {
+    } catch {
         alert('保存失败')
     }
 }
@@ -171,16 +211,9 @@ async function handleDataUpload(e: Event, type: string) {
     const files = (e.target as HTMLInputElement).files
     if (!files || files.length === 0 || !selectedNode.value) return
 
-    // 只保留滚撮的日期校验
-    if (type === 'rolling' && !rollingOpDate.value) return alert('请先选择滚撮操作日期')
-
     const formData = new FormData()
     formData.append('node_name', selectedNode.value)
     formData.append('data_type', type)
-
-    if (type === 'rolling') {
-        formData.append('op_date', rollingOpDate.value)
-    }
 
     for (let i = 0; i < files.length; i++) {
         formData.append('files', files[i])
@@ -193,35 +226,35 @@ async function handleDataUpload(e: Event, type: string) {
             data: formData,
             headers: { 'Content-Type': 'multipart/form-data' }
         })
-        dataFiles.value[type] = true
         alert(`${type} 上传成功`)
     } catch (err: any) {
         alert('上传失败：\n' + (err.message || '未知错误'))
+    } finally {
+        // 允许再次上传同名文件
+        ; (e.target as HTMLInputElement).value = ''
     }
 }
+
 async function uploadRollingData(files: File[]) {
-    if (files.length === 0 || !rollingOpDate.value) return
+    if (files.length === 0 || !rollingOpDate.value || !selectedNode.value) return
 
     const formData = new FormData()
     formData.append('node_name', selectedNode.value)
     formData.append('data_type', 'rolling')
     formData.append('op_date', rollingOpDate.value)
-
-    // 将选中的文件列表全部塞进去
     files.forEach(f => formData.append('files', f))
 
     try {
         await request({ url: '/contract/config/node-data', method: 'post', data: formData })
-        alert('滚撮数据上传成功')
-        rollingFiles.value = [] // 清空组件里的文件
-    } catch (e) {
+        alert('日内滚撮数据上传成功')
+        rollingFiles.value = []
+    } catch {
         alert('上传失败')
     }
 }
 </script>
 
 <style scoped>
-/* 整体布局 */
 .config-container {
     display: flex;
     gap: 20px;
@@ -243,6 +276,8 @@ async function uploadRollingData(files: File[]) {
 
 .panel-right {
     flex: 1;
+    min-width: 0;
+    overflow-y: auto;
 }
 
 .section-title {
@@ -254,7 +289,6 @@ async function uploadRollingData(files: File[]) {
     border-bottom: 1px solid #ebeef5;
 }
 
-/* 表单公共样式 */
 .form-group {
     margin-bottom: 20px;
     display: flex;
@@ -279,19 +313,17 @@ async function uploadRollingData(files: File[]) {
     color: #2d6cdf;
     text-decoration: none;
     font-size: 13px;
-    transition: color 0.2s;
 }
 
 .link:hover {
-    color: #1e4ca1;
     text-decoration: underline;
 }
 
-/* ====== 左侧：虚线上传框样式 ====== */
 .hidden-input {
     display: none;
 }
 
+/* 左侧上传框 */
 .upload-area {
     display: flex;
     justify-content: center;
@@ -335,54 +367,45 @@ async function uploadRollingData(files: File[]) {
     font-weight: 500;
 }
 
-/* ====== 右侧：下拉框 ====== */
-.select-wrapper {
-    position: relative;
-    width: 100%;
-    max-width: 320px;
+/* ===== 右侧：分组 ===== */
+.data-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 8px;
 }
 
-.custom-select {
-    width: 100%;
-    height: 36px;
-    padding: 0 12px;
+.data-group {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.group-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed #cbd5e1;
+}
+
+.group-title {
     font-size: 14px;
-    color: #303133;
-    background-color: #fff;
-    border: 1px solid #dcdfe6;
-    border-radius: 6px;
-    outline: none;
-    appearance: none;
-    /* 隐藏原生箭头 */
-    transition: border-color 0.2s;
-    cursor: pointer;
+    font-weight: 600;
+    color: #1e293b;
 }
 
-.custom-select:focus,
-.custom-select:hover {
-    border-color: #2d6cdf;
+.group-hint {
+    font-size: 12px;
+    color: #94a3b8;
 }
 
-/* 给下拉框加一个自定义箭头 */
-.select-wrapper::after {
-    content: '▾';
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #909399;
-    pointer-events: none;
-    font-size: 14px;
-}
-
-/* ====== 右侧：数据网格与按钮 ====== */
-.data-grid {
+.group-body {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 20px;
-    margin-top: 16px;
-    padding-top: 24px;
-    border-top: 1px dashed #ebeef5;
+    gap: 16px;
 }
 
 .upload-item {
@@ -414,64 +437,13 @@ async function uploadRollingData(files: File[]) {
     font-weight: 500;
 }
 
-/* ====== 底部主按钮 ====== */
-.btn-primary {
-    margin-top: auto;
-    height: 38px;
-    background: #2d6cdf;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 2px 6px rgba(45, 108, 223, 0.2);
-}
-
-.btn-primary:hover {
-    background: #2459b8;
-    box-shadow: 0 4px 12px rgba(45, 108, 223, 0.3);
-}
-
-.btn-primary:active {
-    transform: translateY(1px);
-}
-
-.trade-group {
-    grid-column: 1 / -1;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 16px;
-    margin-top: 10px;
-}
-
-.trade-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #1e293b;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.trade-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-}
-
 .trade-upload-row {
     display: flex;
     gap: 8px;
     align-items: center;
-    margin-top: 4px;
 }
 
 .trade-date-input {
-    flex: 1;
     height: 34px;
     padding: 0 8px;
     border: 1px solid #dcdfe6;

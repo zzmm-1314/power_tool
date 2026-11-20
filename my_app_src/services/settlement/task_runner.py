@@ -12,6 +12,17 @@ tasks: Dict[str, dict] = {}
 _tasks_lock = threading.Lock()
 
 
+def _as_bool(value) -> bool:
+    """前端开关值转布尔：兼容 true/"true"/1/"on" 等写法，缺省为 False"""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
 def start_task(task_type: str, params: dict) -> str:
     """创建并启动新任务，返回 task_id"""
     task_id = str(uuid.uuid4())
@@ -83,6 +94,13 @@ def run_task(task_id: str, task_type: str, params: dict):
                 ],
                 selected_dates=params.get("selected_dates") or [],
                 declaration_file=params.get("declaration_file") or None,
+                node_name=params.get("node_name") or params.get("nodeName"),
+                enable_rolling_spot=_as_bool(
+                    params.get("enable_rolling_spot", params.get("enableRollingSpot"))
+                ),
+                enable_cross_province=_as_bool(
+                    params.get("enable_cross_province", params.get("enableCrossProvince"))
+                ),
                 log_func=log_func,
                 progress_func=progress_func,
             )

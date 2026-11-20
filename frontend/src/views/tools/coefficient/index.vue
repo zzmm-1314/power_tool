@@ -208,7 +208,7 @@ import {
     type PredictResult,
     type ProgressData,
 } from '@/api/modules/coefficient'
-import { listPlantNodes } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 /* ---------------- 表单 ---------------- */
 const form = reactive({
@@ -220,7 +220,8 @@ const form = reactive({
     coeffMin: 0.1,
     coeffMax: 1.9,
 })
-
+/* ---------------- 全局默认节点 ---------------- */
+const globalNode = ref('')
 const nodes = ref<string[]>([])
 const weatherFile = ref<File | null>(null)
 const starting = ref(false)
@@ -262,13 +263,32 @@ async function loadNodes() {
     try {
         const list = await listPlantNodes()
         nodes.value = list.map((n) => n.name)
+        // ⭐ 读取全局节点并缓存
+        try {
+            const g = await fetchGlobalNode()
+            if (g && nodes.value.includes(g)) {
+                globalNode.value = g
+            }
+        } catch {
+            // ignore
+        }
+
+        // 若当前已是 plant 且没选节点，直接套上全局节点
+        if (form.nodeType === 'plant' && !form.nodeName && globalNode.value) {
+            form.nodeName = globalNode.value
+        }
     } catch {
         nodes.value = []
     }
 }
 
 function onTypeChange() {
-    if (form.nodeType === 'unified') form.nodeName = ''
+    if (form.nodeType === 'unified') {
+        form.nodeName = ''
+    } else if (form.nodeType === 'plant' && !form.nodeName && globalNode.value) {
+        // ⭐ 切到 plant 时自动填充全局节点
+        form.nodeName = globalNode.value
+    }
 }
 
 function onWeatherFile(e: Event) {

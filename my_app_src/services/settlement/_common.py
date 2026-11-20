@@ -83,11 +83,13 @@ def prepare_common(
     qty_tenday1: float,
     qty_tenday2: float,
     qty_tenday3: float,
+    need_decompose: bool = True,
 ) -> dict:
     """两个 builder 共用的数据准备：
 
     1) 解析日期范围；
-    2) 调用分解引擎并按日期展开为 {date: {year/month/tendayX: [48点]}}；
+    2) 按需调用分解引擎并按日期展开为 {date: {year/month/tendayX: [48点]}}；
+       need_decompose=False 时完全不调用分解接口，decomp_by_date 为空；
     3) 拉取合约数据（未拆分）+ 节点日前/实时 + 统一结算点日前。
 
     返回 dict，builder 只需在此基础上组装自己的返回结构。
@@ -98,16 +100,18 @@ def prepare_common(
 
     # 延迟导入避免与 api / contract_service 形成循环
     from services.db_store import fetch_contract_data
-    from services.contract_service import generate_contract_decomposition
 
-    decomp_result = generate_contract_decomposition(
-        y, m, qty_year, qty_month, qty_tenday1, qty_tenday2, qty_tenday3
-    )
     decomp_by_date: Dict[str, Dict[str, List[float]]] = {}
-    for key in ("year", "month", "tenday1", "tenday2", "tenday3"):
-        for day_data in decomp_result.get(key, []):
-            d_str = f"{y}-{day_data['date']}"
-            decomp_by_date.setdefault(d_str, {})[key] = day_data["points"]
+    if need_decompose:
+        from services.contract_service import generate_contract_decomposition
+
+        decomp_result = generate_contract_decomposition(
+            y, m, qty_year, qty_month, qty_tenday1, qty_tenday2, qty_tenday3
+        )
+        for key in ("year", "month", "tenday1", "tenday2", "tenday3"):
+            for day_data in decomp_result.get(key, []):
+                d_str = f"{y}-{day_data['date']}"
+                decomp_by_date.setdefault(d_str, {})[key] = day_data["points"]
 
     c_rows = list(fetch_contract_data(node_name, start_date_str, end_date_str) or [])
     node_day = fetch_day_ahead_range(start_date_str, end_date_str, node_name)
@@ -124,6 +128,7 @@ def prepare_common(
         "node_day": node_day,
         "node_rt": node_rt,
         "unified_day": unified_day,
+        "need_decompose": need_decompose,
     }
 
 

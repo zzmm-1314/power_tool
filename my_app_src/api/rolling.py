@@ -1,8 +1,15 @@
 from flask import Blueprint, request
 from utils.response import success, fail
-from services.rolling_analysis import get_rolling_analysis
+from services.spot_profit import compute_rolling_spot_profit
 
 rolling_bp = Blueprint("rolling", __name__)
+
+# 滚撮分析涉及的数据读取（江苏库日前价格 + 日前价格服务）缓存前缀
+PRICE_CACHE_PREFIXES = (
+    "fetch_day_ahead",
+    "fetch_realtime",
+    "fetch_unified_heatmap",
+)
 
 
 @rolling_bp.route("/analysis", methods=["GET"])
@@ -10,7 +17,16 @@ def rolling_analysis():
     target_date = request.args.get("targetDate")
     if not target_date:
         return fail("请选择标的日")
+
+    # refresh=1：先失效滚撮/日前价格相关缓存再查，确保拿到刚上传的数据
+    if str(request.args.get("refresh", "")).strip() in ("1", "true", "yes"):
+        from utils.cache import clear_cache
+
+        clear_cache(PRICE_CACHE_PREFIXES)
+
     try:
+        from services.rolling_analysis import get_rolling_analysis
+
         data = get_rolling_analysis(target_date)
         return success(data)
     except Exception as e:
@@ -26,76 +42,11 @@ def spot_analysis():
     if not unit_name or not start_date or not end_date:
         return fail("缺少参数 node / startDate / endDate")
 
-    from services.db_store import fetch_rolling_spot
-
-    records = fetch_rolling_spot(unit_name, start_date, end_date)
-    if not records:
-        return success([])
-
-    from services.bid_space_service import fetch_day_ahead
-
-    # 按标的日分组，因为电价需要按标的日查
-    by_trade_date = {}
-    for r in records:
-        t_date = str(r["trade_date"])[:10]
-        by_trade_date.setdefault(t_date, []).append(r)
-
-    result = []
-    for t_date, items in by_trade_date.items():
-        # 查标的日的日前电价
-        day_pts = fetch_day_ahead(t_date)
-
-        day_map = {}
-        if day_pts:
-            day_dict = {
-                p["time"]: p["value"] for p in day_pts if p["value"] is not None
-            }
-            for h in range(24):
-                t1 = f"{h:02d}:30"
-                t2 = f"{(h+1):02d}:00" if h < 23 else "24:00"
-                v1 = day_dict.get(t1)
-                v2 = day_dict.get(t2)
-
-                if v1 is not None and v2 is not None:
-                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = round((v1 + v2) / 2, 3)
-                elif v1 is not None:
-                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = v1
-                elif v2 is not None:
-                    day_map[f"{h:02d}:00-{(h+1):02d}:00"] = v2
-
-        for r in items:
-            t_type = r["time_type"]
-            clear_price = day_map.get(t_type, 0.0)
-
-            # ⭐ 修复：强制将 Decimal 转换为 float
-            qty_val = float(r["qty"])
-            price_val = float(r["price"])
-
-            if r["direction"] == "卖方":
-                trade_qty = qty_val
-                price_diff = price_val - clear_price
-            else:
-                trade_qty = -qty_val
-                price_diff = clear_price - price_val
-
-            final_diff = trade_qty * price_diff
-
-            result.append(
-                {
-                    "opDate": r["op_date"],
-                    "tradeDate": r["trade_date"],
-                    "timeType": t_type,
-                    "direction": r["direction"],
-                    "qty": qty_val,
-                    "price": price_val,
-                    "tradeQty": trade_qty,
-                    "clearPrice": clear_price,
-                    "priceDiff": round(price_diff, 3),
-                    "finalDiff": round(final_diff, 2),
-                }
-            )
-
-    result.sort(key=lambda x: (x["opDate"], x["tradeDate"], x["timeType"]))
+    # 口径统一到 services.spot_profit（与模拟结算单共用）
+    try:
+        result = compute_rolling_spot_profit(unit_name, start_date, end_date)
+    except Exception as e:
+        return fail(str(e))
     return success(result)
 
 
@@ -151,6 +102,11 @@ def market_upload():
 
     if total_count == 0:
         return fail("上传失败：" + ("; ".join(errors) if errors else "无有效数据"))
+
+    # 新数据已落库，失效相关读取缓存，避免紧接着的查询命中旧结果
+    from utils.cache import clear_cache
+
+    clear_cache(PRICE_CACHE_PREFIXES)
 
     msg = f"市场滚撮上传成功，共 {total_count} 条"
     if date_set:

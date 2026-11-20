@@ -191,9 +191,9 @@
                             <td style="background: #f0f9eb; color: #67c23a; font-weight: bold;">{{
                                 portfolioTotals.actual }}</td>
                             <td style="background: #f0f9eb; color: #67c23a; font-weight: bold;">{{ portfolioTotals.year
-                            }}</td>
+                                }}</td>
                             <td style="background: #f0f9eb; color: #67c23a; font-weight: bold;">{{ portfolioTotals.month
-                            }}</td>
+                                }}</td>
                             <td style="background: #f0f9eb; color: #67c23a; font-weight: bold;">{{
                                 portfolioTotals.tenday }}</td>
                             <td style="background: #f0f9eb; color: #f56c6c; font-weight: bold;">{{
@@ -201,9 +201,9 @@
                             <td style="background: #f0f9eb; color: #67c23a; font-weight: bold;">{{
                                 portfolioTotals.rollingSell }}</td>
                             <td style="background: #f0f9eb; color: #2d6cdf; font-weight: bold;">{{ portfolioTotals.total
-                            }}</td>
+                                }}</td>
                             <td style="background: #f0f9eb; color: #2d6cdf; font-weight: bold;">{{ portfolioTotals.ratio
-                            }}%</td>
+                                }}%</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -238,7 +238,7 @@ import PageContainer from '@/components/PageContainer.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
-import { listPlantNodes } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 import { request } from '@/api/request'
 import { apiUrl } from '@/utils/apiBase'
 const nodeOptions = ref<string[]>([])
@@ -302,6 +302,17 @@ onMounted(async () => {
     try {
         const list = await listPlantNodes()
         nodeOptions.value = list.map(n => n.name)
+        // ⭐ 默认选中全局节点
+        if (!query.node && nodeOptions.value.length) {
+            try {
+                const g = await fetchGlobalNode()
+                if (g && nodeOptions.value.includes(g)) {
+                    query.node = g
+                }
+            } catch {
+                // ignore
+            }
+        }
     } catch { nodeOptions.value = [] }
 })
 function triggerForecastUpload() {

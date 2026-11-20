@@ -14,6 +14,7 @@ from typing import Dict
 from flask import Blueprint, request
 
 from services.ingest import store_points
+from utils.cache import clear_cache
 from utils.response import success, fail
 
 upload_bp = Blueprint("upload", __name__)
@@ -275,6 +276,11 @@ def upload():
     ok = sum(1 for r in results if r.get("ok"))
     total = len(results)
     persisted = all(r.get("saved") for r in results if r.get("ok")) if ok else False
+
+    # 有新数据落库时清空读取缓存（日前/价差/江苏库查询均为长 TTL 缓存），
+    # 否则紧接着的「查询」会命中旧缓存，看起来像没读到新上传的数据。
+    if ok:
+        clear_cache()
 
     msg = f"已解析 {ok}/{total} 个文件，可即时预览"
     if ok and not persisted:

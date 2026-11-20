@@ -39,6 +39,22 @@ def ttl_cache(seconds=7200):
     return decorator
 
 
-def clear_cache():
+def clear_cache(prefix=None):
+    """清空缓存。
+
+    prefix 为空：清空全部；
+    prefix 为字符串或字符串序列：只清理函数名以该前缀开头的缓存条目
+    （键格式为 "函数名:参数"，因此可按函数粒度失效）。
+    """
     with _LOCK:
-        _CACHE_STORE.clear()
+        if not prefix:
+            _CACHE_STORE.clear()
+            return
+        prefixes = (prefix,) if isinstance(prefix, str) else tuple(prefix)
+        keys = [
+            k
+            for k in _CACHE_STORE
+            if any(k.startswith(f"{p}:") for p in prefixes if p)
+        ]
+        for k in keys:
+            _CACHE_STORE.pop(k, None)

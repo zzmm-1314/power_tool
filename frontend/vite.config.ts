@@ -4,7 +4,8 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   // 部署子路径：https://zidovpp.com/zjPowerTool/
-  base: '/zjPowerTool/',
+  // 后端直接托管（static 目录）时用 VITE_BASE=/ 构建，产物按根路径引用资源
+  base: process.env.VITE_BASE || '/zjPowerTool/',
   plugins: [vue()],
   resolve: {
     alias: {

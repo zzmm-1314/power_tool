@@ -533,7 +533,8 @@ def position_data():
     end_date = f"{y}-{m:02d}-{days_in_month:02d}"
 
     c_rows = list(fetch_contract_data(unit_name, start_date, end_date) or [])
-    r_rows = list(fetch_rolling_spot(unit_name, start_date, end_date) or [])
+    # ⭐ 移除 fetch_rolling_spot：单独滚撮数据仅用于「滚撮收益模拟」页面，
+    #    不再参与合约仓位计算。省内滚撮现由 tmp_contract（province_rolling）提供。
     cp_rows = list(fetch_cross_province_spot(unit_name, start_date, end_date) or [])
 
     # 初始化...
@@ -588,8 +589,36 @@ def position_data():
                 daily_tenday[d][idx] += val
                 daily_contract_sum[d] = daily_contract_sum.get(d, 0) + val
 
-    # 2. 处理滚撮数据
-    for r in r_rows + cp_rows:
+    # 2a. 省内滚撮（来自 tmp_contract, data_type='province_rolling'）
+    #     格式与 year/month 一致：48 点宽表，正值为卖出、负值为买入
+    for r in c_rows:
+        if str(r["data_type"]) != "province_rolling":
+            continue
+        d = str(r["date"])[:10]
+        if d not in daily_points:
+            continue
+        t = str(r["time_label"])
+        val = float(r["value"])
+        # 时间标签 → 索引
+        idx = -1
+        for i in range(48):
+            h = (i + 1) // 2
+            mi = 30 if (i % 2 == 0) else 0
+            tl = f"{h:02d}:{mi:02d}" if i < 47 else "24:00"
+            if tl == t:
+                idx = i
+                break
+        if idx == -1:
+            continue
+        daily_rolling[d][idx] += val
+        daily_contract_sum[d] = daily_contract_sum.get(d, 0) + val
+        if val > 0:
+            daily_rolling_sell_sum[d] = daily_rolling_sell_sum.get(d, 0) + val
+        elif val < 0:
+            daily_rolling_buy_sum[d] = daily_rolling_buy_sum.get(d, 0) + abs(val)
+
+    # 2b. 长三角省间滚撮（来自 tmp_cross_province_spot，保持原有逻辑）
+    for r in cp_rows:
         d = str(r["trade_date"])[:10]
         if d not in daily_points:
             continue
@@ -676,15 +705,30 @@ def position_data():
             if dtype in summary and dtype != "actual":
                 summary[dtype] += float(r["value"])
 
-    # 累加滚撮数据
-    for r in r_rows + cp_rows:
+    # 累加省内滚撮（tmp_contract · province_rolling）
+    for r in c_rows:
+        if str(r["data_type"]) != "province_rolling":
+            continue
+        d = str(r["date"])[:10]
+        if d in valid_dates:
+            val = float(r["value"])
+            summary["rolling"] += val
+            day_num = int(d.split("-")[2])
+            if day_num <= 10:
+                summary["rolling_tenday1"] += val
+            elif day_num <= 20:
+                summary["rolling_tenday2"] += val
+            else:
+                summary["rolling_tenday3"] += val
+
+    # 累加长三角省间滚撮（tmp_cross_province_spot）
+    for r in cp_rows:
         d = str(r["trade_date"])[:10]
         if d in valid_dates:
             direction = str(r["direction"])
             qty = float(r["qty"])
             net_qty = -qty if direction == "购电" else qty
             summary["rolling"] += net_qty
-
             day_num = int(d.split("-")[2])
             if day_num <= 10:
                 summary["rolling_tenday1"] += net_qty
@@ -692,6 +736,7 @@ def position_data():
                 summary["rolling_tenday2"] += net_qty
             else:
                 summary["rolling_tenday3"] += net_qty
+
     # ⭐ 核心修改：实际总电量 = 有效日期内的 (实际+预测) 总和
     # 如果某天只有预测，daily_actual 里存的就是预测值，这里会直接算进去
     summary["actual"] = sum(sum(daily_actual[d]) for d in valid_dates)

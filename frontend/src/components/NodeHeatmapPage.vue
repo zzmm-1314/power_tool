@@ -63,7 +63,7 @@ import {
 } from '@/api/modules/spread'
 import type { DataSource } from '@/types'
 import type { HeatmapConfig } from './node-heatmap-types'
-import { listPlantNodes, fetchPriceCompareDefaults } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 const props = defineProps<{ config: HeatmapConfig }>()
 const appStore = useAppStore()
 
@@ -113,24 +113,17 @@ async function loadNodes() {
         nodes.value = list.map(n => n.name)
 
         if (!nodeName.value && nodes.value.length) {
-            // 1. 尝试获取全局默认节点配置
-            let defaults: string[] = []
+            // 1. 优先使用「全局默认节点」
             try {
-                defaults = await fetchPriceCompareDefaults()
-            } catch {
-                defaults = []
-            }
-
-            // 2. 如果配置了默认节点，优先选默认节点中的第一个（且必须在系统节点列表中）
-            if (defaults.length > 0) {
-                const firstDefault = defaults.find(d => nodes.value.includes(d))
-                if (firstDefault) {
-                    nodeName.value = firstDefault
+                const globalNode = await fetchGlobalNode()
+                if (globalNode && nodes.value.includes(globalNode)) {
+                    nodeName.value = globalNode
                     return
                 }
+            } catch {
+                // ignore
             }
-
-            // 3. 如果没配置或者配置的节点都不存在，则降级选第一个
+            // 2. 回退：第一个节点
             nodeName.value = nodes.value[0]
         }
     } catch {
@@ -148,7 +141,8 @@ async function load() {
     loading.value = true
     try {
         const isPlant = props.config.nodeType === 'plant'
-        const params: any = { startDate: dateStart.value, endDate: dateEnd.value }
+        // _t 时间戳：避免浏览器对 GET 请求做缓存，保证上传后点「查询」拿到新数据
+        const params: any = { startDate: dateStart.value, endDate: dateEnd.value, _t: Date.now() }
         if (isPlant) params.nodeName = nodeName.value
 
         let data: any

@@ -1,7 +1,10 @@
 export interface SettlementSimConfig {
     title: string
     taskType: 'simulate'
-    /** 显示「年度合约来源」下拉 */
+    /**
+     * @deprecated 年度合约来源下拉已移除，改为「合约电量」五项开关。
+     * 保留字段仅为兼容历史配置，不再生效。
+     */
     showYearSource?: boolean
     /**
      * @deprecated 固定申报功率输入框已移除；保留字段仅为兼容历史配置，不再生效。

@@ -73,7 +73,7 @@ import PageContainer from '@/components/PageContainer.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
-import { listPlantNodes } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 import { expandDateRange } from '@/utils/dateRange'
 import { request } from '@/api/request'
 import type { SpotAnalysisConfig, SpotColumnDef } from './spot-analysis-types'
@@ -109,6 +109,17 @@ onMounted(async () => {
     try {
         const list = await listPlantNodes()
         nodeOptions.value = list.map(n => n.name)
+        // ⭐ 默认选中全局节点
+        if (!query.node && nodeOptions.value.length) {
+            try {
+                const g = await fetchGlobalNode()
+                if (g && nodeOptions.value.includes(g)) {
+                    query.node = g
+                }
+            } catch {
+                // ignore
+            }
+        }
     } catch {
         nodeOptions.value = []
     }

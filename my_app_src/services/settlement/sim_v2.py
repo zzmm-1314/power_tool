@@ -8,6 +8,10 @@ from datetime import datetime
 from utils.dates import get_tenday_value
 from utils.excel_utils import find_sheet_by_keywords
 from utils.number_format import apply_number_format_v2
+from services.spot_profit import (
+    daily_cross_province_summary,
+    daily_rolling_spot_summary,
+)
 
 
 def fill_simulation_data_v2(
@@ -24,6 +28,9 @@ def fill_simulation_data_v2(
     tenday_prices,
     selected_dates=None,
     declaration_file=None,  # ← 新增
+    node_name=None,
+    enable_rolling_spot=False,
+    enable_cross_province=False,
     log_func=print,
     progress_func=None,
 ):
@@ -74,6 +81,33 @@ def fill_simulation_data_v2(
 
     summary_rows = []
     total = len(target_sheets)
+
+    # ---------- 滚撮电量 / 电费：按标的日汇总（沿用滚撮收益模拟口径）----------
+    # 两项均为可选：未勾选时不查询、不计算、不写入单元格，也不改变汇总电费
+    rolling_daily: dict = {}
+    cross_daily: dict = {}
+    if enable_rolling_spot or enable_cross_province:
+        if not node_name:
+            log_func("⚠ 未提供节点名称，无法计算所选滚撮数据，本次跳过")
+            enable_rolling_spot = enable_cross_province = False
+        else:
+            range_start = min(d for d, _, _ in target_sheets).strftime("%Y-%m-%d")
+            range_end = max(d for d, _, _ in target_sheets).strftime("%Y-%m-%d")
+            if enable_rolling_spot:
+                rolling_daily = _load_rolling_daily(
+                    node_name, range_start, range_end, log_func=log_func
+                )
+            if enable_cross_province:
+                cross_daily = _load_rolling_daily(
+                    node_name,
+                    range_start,
+                    range_end,
+                    log_func=log_func,
+                    cross_province=True,
+                )
+    if not (enable_rolling_spot or enable_cross_province):
+        log_func("未勾选滚撮数据，Z2/Z3/AA2/AA3 不计算、不写入")
+
     for loop_idx, (date_obj, date_str, ws_tgt) in enumerate(target_sheets):
         if progress_func:
             progress_func(loop_idx, total)
@@ -139,6 +173,24 @@ def fill_simulation_data_v2(
             B_sum += b + f
             D_sum += d + h + m + rr + w
 
+        # 省内滚撮电量 Z2 / 电费 Z3；省间滚撮电量 AA2 / 电费 AA3（仅勾选项写入）
+        rolling_qty = rolling_fee = cross_qty = cross_fee = 0.0
+        if enable_rolling_spot:
+            rolling = rolling_daily.get(date_str, {})
+            rolling_qty = float(rolling.get("qty", 0.0) or 0.0)
+            rolling_fee = float(rolling.get("fee", 0.0) or 0.0)
+            _set_cell(ws_tgt, 2, 26, rolling_qty, "0.000", log_func)  # Z2 省内滚撮电量
+            _set_cell(ws_tgt, 3, 26, rolling_fee, "0.00", log_func)  # Z3 省内滚撮电费
+        if enable_cross_province:
+            cross = cross_daily.get(date_str, {})
+            cross_qty = float(cross.get("qty", 0.0) or 0.0)
+            cross_fee = float(cross.get("fee", 0.0) or 0.0)
+            _set_cell(ws_tgt, 2, 27, cross_qty, "0.000", log_func)  # AA2 省间滚撮电量
+            _set_cell(ws_tgt, 3, 27, cross_fee, "0.00", log_func)  # AA3 省间滚撮电费
+
+        # 汇总电费在 48 点合计基础上叠加已计算的滚撮电费
+        D_sum += rolling_fee + cross_fee
+
         summary_rows.append((date_obj.day, B_sum, D_sum))
 
         date_label = f"{date_obj.month}月{date_obj.day}日"
@@ -167,6 +219,61 @@ def fill_simulation_data_v2(
         log_func(f"✅ 完成！共处理 {len(summary_rows)} 天。")
     except Exception as e:
         log_func(f"保存失败: {e}")
+
+
+# ==================== 滚撮电量 / 电费 ====================
+
+
+def _set_cell(ws, row, col, value, number_format=None, log_func=print):
+    """写入表头区的滚撮汇总单元格。
+
+    若目标坐标落在合并区域的非左上角位置，说明该模板此处是表头文字区域，
+    强行写入会覆盖表头，因此跳过并记录提示（数值仍参与汇总电费计算）。
+    """
+    from openpyxl.utils import get_column_letter
+
+    coord = f"{get_column_letter(col)}{row}"
+    target = ws.cell(row=row, column=col)
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= row <= rng.max_row and rng.min_col <= col <= rng.max_col:
+            if (rng.min_row, rng.min_col) != (row, col):
+                log_func(
+                    f"⚠ {coord} 位于合并单元格 {rng.coord} 内（非左上角），"
+                    f"已跳过写入，仅计入汇总电费"
+                )
+                return None
+            break
+
+    target.value = value
+    if number_format:
+        target.number_format = number_format
+    return target
+
+
+def _load_rolling_daily(
+    node_name, start_date, end_date, log_func=print, cross_province=False
+):
+    """按标的日汇总滚撮的净电量与电费。
+
+    - 省内滚撮：tmp_rolling_spot，调用滚撮收益模拟计算函数
+    - 省间滚撮：tmp_cross_province_spot，调用长三角省间交易收益模拟计算函数
+
+    两者都要求标的有日前出清价格，缺失时由计算函数抛出异常，不再静默补 0。
+    返回 {'YYYY-MM-DD': {'qty': 净电量(买入负/卖出正), 'fee': 电费, 'count': 笔数}}
+    """
+    calc = daily_cross_province_summary if cross_province else daily_rolling_spot_summary
+    label = "省间滚撮" if cross_province else "省内滚撮"
+    try:
+        daily = calc(node_name, start_date, end_date)
+    except Exception as e:
+        log_func(f"错误：{label}电费计算失败：{e}")
+        raise
+
+    log_func(
+        f"{label}已加载 {len(daily)} 个标的日的电量与电费"
+        f"（{start_date} ~ {end_date}）"
+    )
+    return daily
 
 
 # ==================== 申报电量 Excel 解析 ====================

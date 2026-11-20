@@ -230,7 +230,11 @@ onMounted(async () => {
     } catch (e) {
         console.error('加载节点列表失败', e)
     }
-    loadDefaults()
+    await loadDefaults()
+    // 首次加载：默认选中全部默认节点
+    if (!query.nodes && defaultNodes.value.length) {
+        query.nodes = defaultNodes.value.join(',')
+    }
 })
 
 async function loadDefaults() {

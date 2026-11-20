@@ -1,18 +1,12 @@
 <template>
     <PageContainer :title="config.title">
         <div class="form-card">
+            <AnnualConfigNotice />
+
             <div class="form-row">
                 <label>电厂节点</label>
                 <SearchableSelect v-model="selectedNode" :options="nodes"
                     :style="{ width: config.nodeWidth || '250px' }" />
-            </div>
-
-            <div v-if="config.showYearSource" class="form-row">
-                <label>年度合约来源</label>
-                <select v-model="form.yearSource" class="input" style="width: 200px;">
-                    <option value="decompose">按前端输入分解</option>
-                    <option value="database">取数据库已录入</option>
-                </select>
             </div>
 
             <div class="form-row">
@@ -30,27 +24,25 @@
             </div>
 
             <div class="form-row">
-                <label>合约总电量</label>
-                <div class="tenday-row" style="flex-wrap: wrap; gap: 10px;">
-                    <div class="tenday-item">
-                        <span class="tenday-label">年度</span>
-                        <input v-model.number="form.qty_year" type="number" class="input small" />
+                <label>合约电量</label>
+                <div class="field-box">
+                    <div class="field-hint">
+                        勾选的项目按输入电量调用合约分解，未勾选的取数据库已录入电量
                     </div>
-                    <div class="tenday-item">
-                        <span class="tenday-label">月度</span>
-                        <input v-model.number="form.qty_month" type="number" class="input small" />
-                    </div>
-                    <div class="tenday-item">
-                        <span class="tenday-label">上旬</span>
-                        <input v-model.number="form.qty_tenday1" type="number" class="input small" />
-                    </div>
-                    <div class="tenday-item">
-                        <span class="tenday-label">中旬</span>
-                        <input v-model.number="form.qty_tenday2" type="number" class="input small" />
-                    </div>
-                    <div class="tenday-item">
-                        <span class="tenday-label">下旬</span>
-                        <input v-model.number="form.qty_tenday3" type="number" class="input small" />
+                    <div class="switch-grid">
+                        <div v-for="part in contractParts" :key="part.key"
+                            :class="['switch-card', { 'is-on': contractSwitch[part.key] }]">
+                            <label class="switch-head">
+                                <span class="toggle">
+                                    <input v-model="contractSwitch[part.key]" type="checkbox" />
+                                    <span class="toggle-track"><span class="toggle-thumb" /></span>
+                                </span>
+                                <span class="switch-title">{{ part.label }}</span>
+                            </label>
+                            <input v-model.number="form[part.qtyField]" type="number" class="input qty-input"
+                                :disabled="!contractSwitch[part.key]"
+                                :placeholder="contractSwitch[part.key] ? '分解用量' : '取数据库'" />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -82,6 +74,32 @@
             </div>
 
             <div class="form-row">
+                <label>滚撮数据</label>
+                <div class="switch-grid">
+                    <label :class="['switch-card', 'switch-card--flat', { 'is-on': form.enableRollingSpot }]">
+                        <span class="toggle">
+                            <input v-model="form.enableRollingSpot" type="checkbox" />
+                            <span class="toggle-track"><span class="toggle-thumb" /></span>
+                        </span>
+                        <span class="switch-body">
+                            <span class="switch-title">省内滚撮</span>
+                            <span class="switch-desc">Z2 电量 / Z3 电费</span>
+                        </span>
+                    </label>
+                    <label :class="['switch-card', 'switch-card--flat', { 'is-on': form.enableCrossProvince }]">
+                        <span class="toggle">
+                            <input v-model="form.enableCrossProvince" type="checkbox" />
+                            <span class="toggle-track"><span class="toggle-thumb" /></span>
+                        </span>
+                        <span class="switch-body">
+                            <span class="switch-title">省间滚撮</span>
+                            <span class="switch-desc">AA2 电量 / AA3 电费</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-row">
                 <label>日期范围</label>
                 <DateRangeInput :start="form.dateStart" :end="form.dateEnd" @update:start="form.dateStart = $event"
                     @update:end="form.dateEnd = $event" />
@@ -107,7 +125,8 @@ import PathInput from '@/components/PathInput.vue'
 import DateRangeInput from '@/components/DateRangeInput.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import TaskMonitor from '@/components/TaskMonitor.vue'
-import { listPlantNodes } from '@/api/modules/nodes'
+import AnnualConfigNotice from '@/components/AnnualConfigNotice.vue'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 import { expandDateRange } from '@/utils/dateRange'
 import { startSettlementTask, type TaskInfo } from '@/api/modules/settlement'
 import type { SettlementSimConfig } from './settlement-sim-types'
@@ -126,8 +145,24 @@ const msgType = ref<'ok' | 'err'>('ok')
 const router = useRouter()
 const hasCurve = ref(true)
 
+/** 合约电量五个部分：勾选=调用合约分解，未勾选=取数据库 */
+const contractParts = [
+    { key: 'year', label: '年度', qtyField: 'qty_year' },
+    { key: 'month', label: '月度', qtyField: 'qty_month' },
+    { key: 'tenday1', label: '上旬', qtyField: 'qty_tenday1' },
+    { key: 'tenday2', label: '中旬', qtyField: 'qty_tenday2' },
+    { key: 'tenday3', label: '下旬', qtyField: 'qty_tenday3' },
+] as const
+
+const contractSwitch = reactive<Record<string, boolean>>({
+    year: false,
+    month: false,
+    tenday1: false,
+    tenday2: false,
+    tenday3: false,
+})
+
 const form = reactive({
-    yearSource: 'decompose',
     target_file: '',
     declaration_file: '',   // ⭐ 新增：申报电量 Excel 路径
     annual_price: 0,
@@ -140,6 +175,8 @@ const form = reactive({
     qty_tenday1: 0,
     qty_tenday2: 0,
     qty_tenday3: 0,
+    enableRollingSpot: false,
+    enableCrossProvince: false,
     dateStart: '',
     dateEnd: '',
 })
@@ -149,6 +186,17 @@ onMounted(async () => {
     try {
         const list = await listPlantNodes()
         nodes.value = list.map(n => n.name)
+        // ⭐ 默认选中全局节点
+        if (!selectedNode.value) {
+            try {
+                const globalNode = await fetchGlobalNode()
+                if (globalNode && nodes.value.includes(globalNode)) {
+                    selectedNode.value = globalNode
+                }
+            } catch {
+                // ignore
+            }
+        }
     } catch {
         nodes.value = []
     }
@@ -172,8 +220,10 @@ function downloadDeclarationTemplate() {
 
 async function submit() {
     msg.value = ''
-    if (!hasCurve.value) {
-        if (confirm('数据库中缺失「典型曲线」，无法生成结算单。是否现在去配置？')) {
+    // 只有勾选了至少一项合约电量才需要典型曲线
+    const needDecompose = Object.values(contractSwitch).some(Boolean)
+    if (needDecompose && !hasCurve.value) {
+        if (confirm('已勾选按输入电量分解，但数据库中缺失「典型曲线」，无法完成分解。是否现在去配置？')) {
             router.push('/contract/config')
         }
         return
@@ -196,13 +246,18 @@ async function submit() {
 
     starting.value = true
     try {
+        const contract_sources: Record<string, string> = {}
+        for (const part of contractParts) {
+            contract_sources[part.key] = contractSwitch[part.key] ? 'decompose' : 'database'
+        }
+
         const payload: Record<string, any> = {
             node_name: selectedNode.value,
             start_date: form.dateStart,
             end_date: form.dateEnd,
             target_file: form.target_file,
             declaration_file: form.declaration_file,   // ⭐ 新增
-            year_source: form.yearSource,
+            contract_sources,
             annual_price: form.annual_price,
             monthly_price: form.monthly_price,
             tenday_early: form.tenday_early,
@@ -213,6 +268,8 @@ async function submit() {
             qty_tenday1: form.qty_tenday1,
             qty_tenday2: form.qty_tenday2,
             qty_tenday3: form.qty_tenday3,
+            enable_rolling_spot: form.enableRollingSpot,
+            enable_cross_province: form.enableCrossProvince,
             selected_dates: expandDateRange(form.dateStart, form.dateEnd),
         }
 
@@ -244,7 +301,7 @@ function onFinished(task: TaskInfo) {
 
 .form-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     margin-bottom: 12px;
 }
@@ -261,7 +318,9 @@ function onFinished(task: TaskInfo) {
 .form-row> :deep(.path-input),
 .form-row> :deep(.date-multi),
 .form-row>.input,
-.form-row>.tenday-row {
+.form-row>.tenday-row,
+.form-row>.field-box,
+.form-row>.switch-grid {
     flex: 1;
     min-width: 0;
 }
@@ -274,10 +333,17 @@ function onFinished(task: TaskInfo) {
     font-size: 13px;
     outline: none;
     width: 180px;
+    transition: border-color 0.2s, background 0.2s;
 }
 
 .input:focus {
     border-color: #2d6cdf;
+}
+
+.input:disabled {
+    background: #f5f7fa;
+    color: #a8abb2;
+    cursor: not-allowed;
 }
 
 .input.small {
@@ -299,6 +365,136 @@ function onFinished(task: TaskInfo) {
 .tenday-label {
     font-size: 12px;
     color: #606266;
+}
+
+/* ===== 合约电量：开关 + 输入框 ===== */
+.field-box {
+    padding: 10px 12px 12px;
+    border: 1px solid #ebeef5;
+    border-radius: 6px;
+    background: #fafbfc;
+}
+
+.field-hint {
+    font-size: 12px;
+    color: #909399;
+    margin-bottom: 10px;
+}
+
+.switch-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.switch-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 132px;
+    padding: 10px 12px;
+    border: 1px solid #dcdfe6;
+    border-radius: 6px;
+    background: #fff;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.switch-card.is-on {
+    border-color: #2d6cdf;
+    background: #f4f8ff;
+    box-shadow: 0 0 0 2px rgba(45, 108, 223, 0.08);
+}
+
+.switch-card--flat {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    min-width: 172px;
+}
+
+.switch-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.switch-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #303133;
+}
+
+.switch-card.is-on .switch-title {
+    color: #2d6cdf;
+}
+
+.switch-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.switch-desc {
+    font-size: 11px;
+    color: #909399;
+}
+
+.qty-input {
+    width: 100%;
+    height: 30px;
+}
+
+/* ===== 开关（toggle）外观 ===== */
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    background: #dcdfe6;
+    transition: background 0.2s ease;
+}
+
+.toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    transition: transform 0.2s ease;
+}
+
+.toggle input:checked+.toggle-track {
+    background: #2d6cdf;
+}
+
+.toggle input:checked+.toggle-track .toggle-thumb {
+    transform: translateX(16px);
+}
+
+.toggle input:focus-visible+.toggle-track {
+    box-shadow: 0 0 0 3px rgba(45, 108, 223, 0.22);
 }
 
 .form-actions {

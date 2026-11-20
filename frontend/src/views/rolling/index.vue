@@ -6,7 +6,7 @@
                 <label>标的日 (D日)</label>
                 <input type="date" v-model="params.date" class="input" />
             </div>
-            <button class="btn-primary" :disabled="loading" @click="loadData">
+            <button class="btn-primary" :disabled="loading" @click="loadData(true)">
                 {{ loading ? '计算中...' : '🔍 查询分析' }}
             </button>
             <button class="btn-upload" :disabled="uploading" @click="triggerUpload">
@@ -14,6 +14,12 @@
             </button>
             <input ref="fileInputRef" type="file" accept=".xlsx,.xls" multiple class="hidden-input"
                 @change="handleUpload" />
+            <span class="source-tag" :class="sourceCls">{{ sourceText }}</span>
+        </div>
+
+        <!-- 数据提示 -->
+        <div v-if="tips.length" class="tips">
+            <span v-for="(t, i) in tips" :key="i" class="tip-item">{{ t }}</span>
         </div>
 
         <!-- 图例说明 -->
@@ -78,7 +84,12 @@
                         </tr>
                         <tr v-if="!tableData.length">
                             <td colspan="14" class="empty-row">
-                                {{ loading ? '加载中...' : '请选择标的日并点击查询' }}
+                                <template v-if="loading">加载中...</template>
+                                <template v-else-if="!params.date">请选择标的日并点击查询</template>
+                                <template v-else>
+                                    暂无数据：该标的日既没有日前价格，也没有 D-2/D-3/D-4 的市场滚撮记录<br />
+                                    可先上传日前电价与市场滚撮数据，或更换标的日后再查
+                                </template>
                             </td>
                         </tr>
                     </tbody>
@@ -95,16 +106,65 @@ import { request } from '@/api/request'
 
 const loading = ref(false)
 const uploading = ref(false)
-const params = reactive({ date: '' })
+const params = reactive({ date: todayStr() })
 const tableData = ref<any[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
+
+function todayStr() {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 // 后端返回的 D-2/D-3/D-4 日期（用于表头）
 const apiDates = reactive({ d2: '', d3: '', d4: '' })
 
+// 日前价格来源与数据缺口提示
+const dayAheadSource = ref<'jiangsu' | 'zhejiang' | 'mixed' | 'none' | ''>('')
+const dayAheadHours = ref(0)
+const marketDates = reactive({ d2: false, d3: false, d4: false })
+
 const dateD2 = computed(() => apiDates.d2 || 'D-2')
 const dateD3 = computed(() => apiDates.d3 || 'D-3')
 const dateD4 = computed(() => apiDates.d4 || 'D-4')
+
+const sourceText = computed(() => {
+    switch (dayAheadSource.value) {
+        case 'jiangsu':
+            return '● 日前价格：江苏库'
+        case 'zhejiang':
+            return '● 日前价格：浙江库（上传数据）'
+        case 'mixed':
+            return '● 日前价格：江苏库 + 浙江库补齐'
+        case 'none':
+            return '○ 日前价格：无数据'
+        default:
+            return '○ 尚未查询'
+    }
+})
+
+const sourceCls = computed(() => ({
+    js: dayAheadSource.value === 'jiangsu',
+    zj: dayAheadSource.value === 'zhejiang' || dayAheadSource.value === 'mixed',
+    none: !dayAheadSource.value || dayAheadSource.value === 'none',
+}))
+
+const tips = computed(() => {
+    const list: string[] = []
+    if (dayAheadSource.value === 'none') {
+        list.push('标的前日价格缺失：江苏库与浙江库都没有该日数据，可先上传日前电价后再查询')
+    } else if (dayAheadHours.value > 0 && dayAheadHours.value < 24) {
+        list.push(`日前价格仅覆盖 ${dayAheadHours.value}/24 小时，缺口时段价差为空`)
+    }
+    const missing = [
+        !marketDates.d2 ? dateD2.value : '',
+        !marketDates.d3 ? dateD3.value : '',
+        !marketDates.d4 ? dateD4.value : '',
+    ].filter(Boolean)
+    if (missing.length) {
+        list.push(`市场滚撮缺少 ${missing.join('、')} 的数据，对应电量列按 0 计算`)
+    }
+    return list
+})
 
 function format(v: number | null | undefined) {
     if (v == null || isNaN(v)) return '-'
@@ -133,22 +193,37 @@ function diffStyle(v: number | null) {
     }
 }
 
-async function loadData() {
+/**
+ * 查询分析
+ * @param refresh true 时要求后端跳过读取缓存，确保拿到刚上传的数据
+ */
+async function loadData(refresh = true) {
     if (!params.date) return alert('请选择标的日')
     loading.value = true
     try {
         const res: any = await request({
             url: '/rolling/analysis',
             method: 'get',
-            params: { targetDate: params.date },
+            // _t：绕过浏览器 GET 缓存；refresh：让后端跳过服务端缓存
+            params: refresh
+                ? { targetDate: params.date, refresh: 1, _t: Date.now() }
+                : { targetDate: params.date },
         })
         tableData.value = res.rows || []
         apiDates.d2 = res.d2Date || ''
         apiDates.d3 = res.d3Date || ''
         apiDates.d4 = res.d4Date || ''
+        dayAheadSource.value = res.dayAheadSource || 'none'
+        dayAheadHours.value = res.dayAheadHours || 0
+        marketDates.d2 = !!res.marketDates?.d2
+        marketDates.d3 = !!res.marketDates?.d3
+        marketDates.d4 = !!res.marketDates?.d4
     } catch (err: any) {
         alert('查询失败：' + (err.message || '后端服务异常'))
         tableData.value = []
+        dayAheadSource.value = ''
+        dayAheadHours.value = 0
+        marketDates.d2 = marketDates.d3 = marketDates.d4 = false
     } finally {
         loading.value = false
     }
@@ -176,7 +251,10 @@ async function handleUpload(e: Event) {
             data: fd,
         })
         alert(`上传成功，共 ${res.count || 0} 条`)
-        await loadData()
+        // 上传成功后自动刷新一次（后端已清理缓存，此处强制重新取数）
+        if (params.date) {
+            await loadData(true)
+        }
     } catch (err: any) {
         alert('上传失败：' + (err.message || '未知错误'))
     } finally {
@@ -197,6 +275,44 @@ async function handleUpload(e: Event) {
     border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
     flex-wrap: wrap;
+}
+
+/* ===== 来源标签 ===== */
+.source-tag {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.source-tag.js {
+    background: #ecf5ff;
+    color: #2d6cdf;
+}
+
+.source-tag.zj {
+    background: #fdf6ec;
+    color: #e6a23c;
+}
+
+.source-tag.none {
+    background: #f4f4f5;
+    color: #909399;
+}
+
+/* ===== 数据提示 ===== */
+.tips {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    padding: 10px 16px;
+    background: #fdf6ec;
+    border-left: 3px solid #e6a23c;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #b88230;
 }
 
 .form-group {

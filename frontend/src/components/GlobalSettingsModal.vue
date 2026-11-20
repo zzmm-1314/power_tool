@@ -3,30 +3,56 @@
         <div v-if="visible" class="modal-mask" @click.self="close">
             <div class="modal-content">
                 <div class="modal-header">
-                    <span>全局默认节点设置</span>
+                    <span>全局节点设置</span>
                     <span class="close-btn" @click="close">✕</span>
                 </div>
                 <div class="modal-body">
-                    <p class="hint">设置后，在「上传数据」和「电价对比」时，可快捷选择这些默认节点。</p>
-
-                    <div class="search-box">
-                        <input v-model="searchKeyword" type="text" class="search-input" placeholder="搜索所有电厂节点..." />
-                    </div>
-
-                    <div class="options-list">
-                        <div v-for="node in filteredNodes" :key="node" class="option-item" @click="addNode(node)">
-                            {{ node }}
+                    <!-- ===== 全局默认节点（单节点） ===== -->
+                    <div class="section">
+                        <div class="section-title">
+                            全局默认节点
+                            <span class="section-hint">价格、合约、申报系数、结算单等页面默认展示此节点</span>
                         </div>
-                        <div v-if="!filteredNodes.length" class="empty-option">无匹配节点</div>
+                        <div class="global-node-row">
+                            <SearchableSelect v-model="globalNode" :options="allNodeNames" placeholder="搜索并选择默认节点..."
+                                style="flex: 1;" />
+                            <button class="btn ghost small" :disabled="!globalNode" @click="globalNode = ''">
+                                清空
+                            </button>
+                        </div>
+                        <div v-if="globalNode" class="global-node-current">
+                            当前：<strong>{{ globalNode }}</strong>
+                        </div>
                     </div>
 
-                    <div class="selected-area">
-                        <div class="selected-title">已选默认节点（点击右侧叉号移除）</div>
-                        <div class="selected-tags">
-                            <span v-for="(node, idx) in selectedNodes" :key="idx" class="tag">
-                                {{ node }} <span class="remove-btn" @click="removeNode(idx)">✕</span>
-                            </span>
-                            <span v-if="!selectedNodes.length" class="empty-selected">暂未选择</span>
+                    <div class="section-divider"></div>
+
+                    <!-- ===== 快捷选择节点（多选，上传用） ===== -->
+                    <div class="section">
+                        <div class="section-title">
+                            上传时的快捷节点
+                            <span class="section-hint">上传数据时可一键勾选</span>
+                        </div>
+
+                        <div class="search-box">
+                            <input v-model="searchKeyword" type="text" class="search-input" placeholder="搜索所有电厂节点..." />
+                        </div>
+
+                        <div class="options-list">
+                            <div v-for="node in filteredNodes" :key="node" class="option-item" @click="addNode(node)">
+                                {{ node }}
+                            </div>
+                            <div v-if="!filteredNodes.length" class="empty-option">无匹配节点</div>
+                        </div>
+
+                        <div class="selected-area">
+                            <div class="selected-title">已选快捷节点（点击右侧叉号移除）</div>
+                            <div class="selected-tags">
+                                <span v-for="(node, idx) in selectedNodes" :key="idx" class="tag">
+                                    {{ node }} <span class="remove-btn" @click="removeNode(idx)">✕</span>
+                                </span>
+                                <span v-if="!selectedNodes.length" class="empty-selected">暂未选择</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -43,7 +69,14 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { listPlantNodes, fetchPriceCompareDefaults, savePriceCompareDefaults } from '@/api/modules/nodes'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import {
+    listPlantNodes,
+    fetchPriceCompareDefaults,
+    savePriceCompareDefaults,
+    fetchGlobalNode,
+    saveGlobalNode,
+} from '@/api/modules/nodes'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>()
@@ -54,7 +87,9 @@ const visible = computed({
 })
 
 const allNodes = ref<string[]>([])
+const allNodeNames = computed(() => allNodes.value)
 const selectedNodes = ref<string[]>([])
+const globalNode = ref('')
 const searchKeyword = ref('')
 const saving = ref(false)
 
@@ -68,12 +103,14 @@ const filteredNodes = computed(() => {
 
 async function loadData() {
     try {
-        const [nodes, defaults] = await Promise.all([
+        const [nodes, defaults, gNode] = await Promise.all([
             listPlantNodes(),
-            fetchPriceCompareDefaults()
+            fetchPriceCompareDefaults(),
+            fetchGlobalNode(),
         ])
         allNodes.value = nodes.map(n => n.name)
         selectedNodes.value = defaults || []
+        globalNode.value = gNode || ''
     } catch (e) {
         console.warn('加载节点数据失败', e)
     }
@@ -93,8 +130,11 @@ function removeNode(idx: number) {
 async function save() {
     saving.value = true
     try {
-        await savePriceCompareDefaults(selectedNodes.value)
-        alert('默认节点设置已保存！')
+        await Promise.all([
+            savePriceCompareDefaults(selectedNodes.value),
+            saveGlobalNode(globalNode.value),
+        ])
+        alert('节点设置已保存！')
         close()
     } catch (e) {
         alert('保存失败：' + (e as Error).message)
@@ -127,14 +167,14 @@ watch(visible, (v) => {
 }
 
 .modal-content {
-    width: 500px;
+    width: 560px;
     background: #fff;
     border-radius: 8px;
     padding: 20px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
     display: flex;
     flex-direction: column;
-    max-height: 80vh;
+    max-height: 85vh;
 }
 
 .modal-header {
@@ -143,7 +183,7 @@ watch(visible, (v) => {
     align-items: center;
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
     color: #303133;
 }
 
@@ -157,18 +197,58 @@ watch(visible, (v) => {
     color: #303133;
 }
 
-.hint {
-    font-size: 12px;
-    color: #909399;
-    margin: 0 0 12px;
-}
-
 .modal-body {
     flex: 1;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    gap: 12px;
+    gap: 16px;
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2d3d;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.section-hint {
+    font-size: 12px;
+    font-weight: 400;
+    color: #909399;
+}
+
+.section-divider {
+    height: 1px;
+    background: #ebeef5;
+    margin: 4px 0;
+}
+
+.global-node-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.global-node-current {
+    font-size: 12px;
+    color: #606266;
+    padding: 6px 10px;
+    background: #f0f9eb;
+    border-radius: 4px;
+}
+
+.global-node-current strong {
+    color: #67c23a;
 }
 
 .search-input {
@@ -187,11 +267,10 @@ watch(visible, (v) => {
 }
 
 .options-list {
-    flex: 1;
-    overflow-y: auto;
     border: 1px solid #ebeef5;
     border-radius: 6px;
-    max-height: 200px;
+    max-height: 160px;
+    overflow-y: auto;
     background: #fafbfc;
 }
 
@@ -214,9 +293,8 @@ watch(visible, (v) => {
 }
 
 .selected-area {
-    flex-shrink: 0;
     border-top: 1px dashed #ebeef5;
-    padding-top: 12px;
+    padding-top: 10px;
 }
 
 .selected-title {
@@ -286,6 +364,12 @@ watch(visible, (v) => {
     background: #fff;
     color: #606266;
     border: 1px solid #dcdfe6;
+}
+
+.btn.ghost.small {
+    height: 28px;
+    padding: 0 12px;
+    font-size: 12px;
 }
 
 .btn:disabled {

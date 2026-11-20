@@ -201,7 +201,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import PageContainer from '@/components/PageContainer.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
-import { listPlantNodes } from '@/api/modules/nodes'
+import { listPlantNodes, fetchGlobalNode } from '@/api/modules/nodes'
 import { request } from '@/api/request'
 import { apiUrl } from '@/utils/apiBase'
 /* ==================== 状态 ==================== */
@@ -273,12 +273,26 @@ async function loadRecords() {
     }
 }
 
-function loadNodes() {
-    listPlantNodes().then(list => {
+async function loadNodes() {
+    try {
+        const list = await listPlantNodes()
         nodeOptions.value = list.map(n => n.name)
-        if (!query.node && nodeOptions.value.length) query.node = nodeOptions.value[0]
-    }).catch(() => undefined)
+        // 默认选中全局节点
+        if (!query.node && nodeOptions.value.length) {
+            try {
+                const g = await fetchGlobalNode()
+                if (g && nodeOptions.value.includes(g)) {
+                    query.node = g
+                }
+            } catch {
+                // ignore
+            }
+        }
+    } catch {
+        // ignore
+    }
 }
+
 
 watch(() => query.node, loadRecords)
 onMounted(() => {
